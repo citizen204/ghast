@@ -311,7 +311,13 @@ def artifact_poisoning(ctx: Context) -> Iterable[Finding]:
         # Where does the artifact land?  With no `path:`, it lands in the
         # workspace and can overwrite files the checkout just placed there.
         download_path = str((download.with_ or {}).get("path", "")).strip()
-        isolated = bool(download_path) and not download_path.startswith((".", "$GITHUB_WORKSPACE"))
+        # Any named subdirectory keeps the artifact off the checkout's own
+        # files; only an unset path (or the workspace root itself) drops it
+        # straight on top of them.  `path: ./tmp` counts as isolation --
+        # treating every relative path as unsafe misreports ant-design/ant-design.
+        normalised = download_path.rstrip("/")
+        isolated = bool(normalised) and normalised not in (
+            ".", "./", "${{ github.workspace }}", "$GITHUB_WORKSPACE")
         later = [s for s in job.steps if s.index > download.index]
         tokens = _untrusted_tokens(download, later)
 

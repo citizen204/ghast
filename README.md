@@ -221,6 +221,18 @@ pinned as regression tests in [`tests/test_rules.py`](tests/test_rules.py):
   job's own `if:` reported a carefully hardened workflow as a critical pwn request.
   `ghast` walks the dependency graph, and stops inheriting when a job opts out of the
   skip with `always()` or `!cancelled()`.
+- **A custom runner label is genuinely ambiguous.** Organisations name their
+  GitHub-hosted larger runners whatever they like — `vscode-large-runners`,
+  `gemini-cli-ubuntu-16-core` — and a self-hosted runner is also just a string. Nothing
+  in the workflow file separates them, so `ghast` reports these as *unresolved* at
+  reduced confidence and says so, while a literal `self-hosted` label stays certain.
+- **`path: ./tmp` is isolation.** Treating every relative download path as unsafe
+  misreported ant-design/ant-design; only an unset path drops the artifact on top of the
+  checkout.
+- **A gate need not use a comparison.** `if: fromJSON(needs.check-trust.outputs.trusted)`
+  is an authorisation gate that an operator-anchored pattern misses. `ghast` now finds
+  it — and then reports that `check-trust` never actually inspects the actor, which is
+  the real problem with that particular gate.
 - **Not every third-party runner is ephemeral.** Blacksmith and Depot destroy the VM
   after each job; CodSpeed's macro runners are dedicated bare metal whose purpose is
   hardware consistency, which is a different claim. `ghast` keeps three classes and, for

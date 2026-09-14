@@ -86,6 +86,7 @@ def self_hosted_untrusted(ctx: Context) -> Iterable[Finding]:
         if job.runs_on_group:
             labels = "group: " + labels
         third_party = job.runner_class == knowledge.RUNNER_THIRD_PARTY
+        unresolved = job.runner_class == knowledge.RUNNER_UNKNOWN
         impact = IMPACT_PERSISTENCE
         confidence = "certain"
         notes = [
@@ -101,6 +102,14 @@ def self_hosted_untrusted(ctx: Context) -> Iterable[Finding]:
                 "business and is not visible here -- if it is ephemeral, the persistence "
                 "argument below does not apply".format(labels)
             )
+        elif unresolved:
+            confidence = "likely"
+            notes.append(
+                "`{}` is not a GitHub-hosted runner name, so this is either one of your own "
+                "machines or a larger runner your organisation named itself -- the workflow "
+                "file does not say which. If it is self-hosted, state left on it survives "
+                "into later jobs".format(labels)
+            )
         else:
             notes.append("state left on the machine survives into later jobs")
         if trigger.secrets:
@@ -109,7 +118,8 @@ def self_hosted_untrusted(ctx: Context) -> Iterable[Finding]:
         findings.append(Finding(
             rule_id=SELF_HOSTED_PUBLIC.id,
             title="{} runner is reachable by `{}`".format(
-                "Third-party managed" if third_party else "Self-hosted", trigger.name),
+                "Third-party managed" if third_party else
+                "Non-GitHub-hosted" if unresolved else "Self-hosted", trigger.name),
             path=ctx.wf.path, line=job.runs_on_pos.line, job=job.id,
             message=_sentence(SELF_HOSTED_PUBLIC.summary) + " " +
                     _sentence(SELF_HOSTED_PUBLIC.description, 1),

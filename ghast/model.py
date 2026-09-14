@@ -157,7 +157,9 @@ class Job:
         Deliberately *not* included: GitHub's own larger runners, and the
         managed-ephemeral providers, whose VMs are destroyed after each job.
         """
-        return self.runner_class in ("self-hosted", "third-party-managed")
+        from . import knowledge
+
+        return self.runner_class in knowledge.REPORTABLE_RUNNER_CLASSES
 
     @property
     def runner_class(self) -> str:
@@ -173,8 +175,8 @@ class Job:
             classes.append(knowledge.classify_runner_label(label))
         if not classes:
             return knowledge.RUNNER_HOSTED
-        for kind in (knowledge.RUNNER_SELF_HOSTED, knowledge.RUNNER_THIRD_PARTY,
-                     knowledge.RUNNER_EPHEMERAL):
+        for kind in (knowledge.RUNNER_SELF_HOSTED, knowledge.RUNNER_UNKNOWN,
+                     knowledge.RUNNER_THIRD_PARTY, knowledge.RUNNER_EPHEMERAL):
             if kind in classes:
                 return kind
         return knowledge.RUNNER_HOSTED

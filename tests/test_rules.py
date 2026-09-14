@@ -764,3 +764,92 @@ jobs:
     steps: [{run: echo a}]
 """)
     assert "GHAST030" not in rule_ids(findings)
+
+
+def test_explicit_self_hosted_label_stays_certain():
+    """microsoft/vscode writes `self-hosted` literally. No ambiguity there."""
+    findings = analyse("""
+on: pull_request
+jobs:
+  a:
+    runs-on: [self-hosted, "1ES.Pool=vscode-oss-ubuntu"]
+    steps: [{run: echo a}]
+""")
+    finding = of_rule(findings, "GHAST030")[0]
+    assert finding.factors.confidence == "certain"
+    assert finding.severity == "critical"
+    assert finding.title.startswith("Self-hosted")
+
+
+def test_unresolvable_runner_label_is_reported_with_lower_confidence():
+    """`vscode-large-runners` and `gemini-cli-ubuntu-16-core` could be an
+    organisation's GitHub-hosted larger runners. Nothing in the workflow file
+    distinguishes those from a self-hosted machine, so asserting one is wrong."""
+    findings = analyse("""
+on: pull_request
+jobs:
+  a:
+    runs-on: gemini-cli-ubuntu-16-core
+    steps: [{run: echo a}]
+""")
+    finding = of_rule(findings, "GHAST030")[0]
+    assert finding.factors.confidence == "likely"
+    assert "Non-GitHub-hosted" in finding.title
+    assert any("does not say which" in n for n in finding.factors.notes)
+
+
+def test_artifact_download_into_a_subdirectory_counts_as_isolated():
+    """ant-design/ant-design uses `path: ./tmp`. That keeps the artifact off
+    the checkout's own files; only an unset path drops it on top of them."""
+    def build(path_line):
+        return analyse("""
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@1234567890abcdef1234567890abcdef12345678
+        with:
+          name: report
+""" + path_line + """
+      - run: tar -xzvf tmp/report.tar.gz -C ./out
+""")
+    isolated = of_rule(build("          path: ./tmp"), "GHAST022")[0]
+    workspace = of_rule(build(""), "GHAST022")[0]
+    assert isolated.score < workspace.score
+    assert any("isolated in `./tmp`" in n for n in isolated.factors.notes)
+
+
+def test_boolean_delegated_gate_is_recognised_without_a_comparison():
+    """`if: fromJSON(needs.check-trust.outputs.trusted)` is a gate. An
+    operator-anchored pattern misses it, as it did on ant-design/ant-design."""
+    findings = analyse("""
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+jobs:
+  check-trust:
+    runs-on: ubuntu-latest
+    outputs:
+      trusted: ${{ steps.c.outputs.t }}
+    steps:
+      - id: c
+        run: echo "t=true" >> $GITHUB_OUTPUT
+  report:
+    needs: [check-trust]
+    if: fromJSON(needs.check-trust.outputs.trusted)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@1234567890abcdef1234567890abcdef12345678
+        with:
+          name: report
+          path: ./tmp
+      - run: tar -xzvf tmp/report.tar.gz -C ./out
+""")
+    finding = of_rule(findings, "GHAST022")[0]
+    assert finding.factors.guard == "weak"
+    assert any("not seen checking who the actor is" in n for n in finding.factors.notes)

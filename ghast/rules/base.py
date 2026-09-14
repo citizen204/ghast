@@ -163,10 +163,13 @@ def required_actor(source_actor: str, trigger: Trigger) -> str:
 
 #: `if: needs.check-permissions.outputs.is_authorized == 'true'` -- a very
 #: common shape where the authorisation decision is delegated to an earlier job.
+#: The comparison is optional: `if: fromJSON(needs.check-trust.outputs.trusted)`
+#: uses the output directly as a boolean, which ant-design/ant-design does and
+#: an operator-anchored pattern misses entirely.
 _DELEGATED_RE = re.compile(
     r"needs\.([A-Za-z0-9_-]+)\.outputs\.([A-Za-z0-9_-]*"
-    r"(?:auth|approv|permit|allow|member|collaborat|trusted|safe|internal)"
-    r"[A-Za-z0-9_-]*)\s*[=!]=",
+    r"(?:auth|approv|permit|allow|member|collaborat|trust|safe|internal)"
+    r"[A-Za-z0-9_-]*)",
     re.IGNORECASE,
 )
 

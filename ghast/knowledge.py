@@ -257,6 +257,12 @@ RUNNER_HOSTED = "hosted"
 RUNNER_EPHEMERAL = "ephemeral-managed"
 RUNNER_THIRD_PARTY = "third-party-managed"
 RUNNER_SELF_HOSTED = "self-hosted"
+#: A label we cannot place.  Organisations name GitHub-hosted larger runners
+#: whatever they like (`vscode-large-runners`, `gemini-cli-ubuntu-16-core`),
+#: and a self-hosted runner is also just a string.  Nothing in the workflow
+#: file distinguishes them, so the honest answer is "unresolved", reported at
+#: reduced confidence rather than asserted as self-hosted.
+RUNNER_UNKNOWN = "unresolved"
 
 
 def _clean_label(label: str) -> str:
@@ -273,11 +279,15 @@ def classify_runner_label(label: str) -> str:
         return RUNNER_EPHEMERAL
     if any(low.startswith(p) for p in THIRD_PARTY_RUNNER_PREFIXES):
         return RUNNER_THIRD_PARTY
-    return RUNNER_SELF_HOSTED
+    return RUNNER_UNKNOWN
 
 
 def is_managed_runner_label(label: str) -> bool:
     return classify_runner_label(label) in (RUNNER_EPHEMERAL, RUNNER_THIRD_PARTY)
+
+
+#: Classes where an attacker running code is worth reporting.
+REPORTABLE_RUNNER_CLASSES = (RUNNER_SELF_HOSTED, RUNNER_THIRD_PARTY, RUNNER_UNKNOWN)
 
 
 def is_hosted_runner_label(label: str) -> bool:
