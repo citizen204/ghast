@@ -542,3 +542,27 @@ jobs:
       - run: echo scan
 """)
     assert "GHAST012" not in rule_ids(findings)
+
+
+def test_env_routed_value_in_a_quoted_assignment_is_clean():
+    """The full rtk-ai/rtk shape: env indirection plus quoted reads."""
+    findings = analyse("""
+on: pull_request_target
+permissions:
+  pull-requests: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Next Release PR
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          ENTRY="- ${PR_TITLE} [#${PR_NUMBER}](${PR_URL})"
+          echo "$ENTRY"
+""")
+    injection = [f for f in findings if f.rule_id.startswith("GHAST00")]
+    assert injection == [], [f.rule_id + " @" + str(f.line) for f in injection]

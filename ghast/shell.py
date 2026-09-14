@@ -48,15 +48,23 @@ class VarUse:
     in_eval: bool
     line: int           # 1-based line within the script
     line_text: str
+    #: The read sits where the shell expects a command name (`$CMD arg`).
+    #: Only meaningful unquoted: inside double quotes the whole span is one
+    #: word, so `ENTRY="- $TITLE"` is an assignment, not an invocation.
+    in_command_position: bool = False
 
     @property
     def is_execution(self) -> bool:
         """Does reading this variable here let the attacker run commands?"""
         if self.in_eval:
+            # `eval "$V"` and `bash -c "$V"` re-parse the contents whether or
+            # not the read itself was quoted.
             return True
-        # Inside double quotes the shell still expands $(...) and ``, but the
-        # *variable's* own content is not re-parsed, so this is safe.
-        return False
+        if self.quoting != QUOTE_NONE:
+            # Inside double quotes the shell still expands $(...) and ``, but
+            # the *variable's* own content is never re-parsed.
+            return False
+        return self.in_command_position
 
     @property
     def is_argument_injection(self) -> bool:
@@ -104,10 +112,7 @@ def quote_map(script: str) -> List[str]:
 def _prefix_is_eval(prefix_line: str) -> bool:
     """Does the text before this read on the same line re-parse its value?"""
     lowered = prefix_line.lower()
-    if any(pattern.search(lowered) for pattern in _EVAL_PATTERNS):
-        return True
-    # A variable sitting in command position *is* the command: `$CMD arg`.
-    return _is_command_position(prefix_line)
+    return any(pattern.search(lowered) for pattern in _EVAL_PATTERNS)
 
 
 _ASSIGN_PREFIX = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*$")
@@ -168,6 +173,7 @@ def find_var_uses(script: str, name: str) -> List[VarUse]:
         line_start = script.rfind("\n", 0, offset) + 1
         prefix_line = script[line_start:offset]
         in_eval = _prefix_is_eval(prefix_line)
+        command_position = state == QUOTE_NONE and _is_command_position(prefix_line)
         uses.append(
             VarUse(
                 name=name,
@@ -176,6 +182,7 @@ def find_var_uses(script: str, name: str) -> List[VarUse]:
                 in_eval=in_eval,
                 line=int(line_no),
                 line_text=str(line_text),
+                in_command_position=command_position,
             )
         )
     return uses

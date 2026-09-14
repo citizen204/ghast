@@ -53,3 +53,44 @@ def test_env_file_writes_are_found():
 def test_line_numbers_are_one_based():
     uses = shell.find_var_uses("first\nsecond $V\n", "V")
     assert uses[0].line == 2
+
+
+# --- regression: quoting decides whether command position is even possible ---
+
+QUOTED_ASSIGNMENT_CASES = [
+    # rtk-ai/rtk next-release.yml did exactly this, and it is the *correct*
+    # pattern: the payload value is carried in env and read inside quotes.
+    'ENTRY="- ${V} [#${N}](${U})"',
+    'ENTRY="- $V"',
+    'MSG="prefix $V suffix"',
+    'BODY="$V"',
+]
+
+
+@pytest.mark.parametrize("script", QUOTED_ASSIGNMENT_CASES)
+def test_quoted_assignment_is_not_command_position(script):
+    """`NAME="... $V ..."` is a string assignment, not an invocation.
+
+    The assignment-prefix regex matched `ENTRY="-` plus a space and concluded
+    the read sat in command position, so ghast reported a hardened workflow as
+    a high-severity execution sink.
+    """
+    uses = shell.find_var_uses(script, "V")
+    assert uses, script
+    assert not any(u.is_execution for u in uses), script
+
+
+def test_single_quoted_assignment_has_no_expansion_at_all():
+    """Stronger than "not execution": in single quotes nothing expands, so
+    there is no read to classify."""
+    assert shell.find_var_uses("LIT='- $V'", "V") == []
+
+
+def test_unquoted_assignment_is_also_not_execution():
+    assert not any(u.is_execution for u in shell.find_var_uses("VAR=$V", "V"))
+
+
+def test_eval_still_wins_over_quoting():
+    """Quoting does not save you when the whole span is handed to a parser."""
+    assert any(u.is_execution for u in shell.find_var_uses('eval "$V"', "V"))
+    assert any(u.is_execution for u in shell.find_var_uses('bash -c "$V"', "V"))
