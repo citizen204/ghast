@@ -222,16 +222,17 @@ def test_cache_written_after_untrusted_checkout_on_a_trusted_trigger():
     default branch's cache scope, in a job that first checked out a PR head."""
     findings = analyse("""
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@1234567890abcdef1234567890abcdef12345678
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: refs/pull/${{ github.event.inputs.pr_number }}/merge
       - uses: actions/cache@1234567890abcdef1234567890abcdef12345678
         with:
           key: build-${{ github.sha }}
@@ -241,6 +242,59 @@ jobs:
     assert any("may write the default branch's cache scope" in n
                for n in finding.factors.notes)
     assert any("checked out" in n for n in finding.factors.notes)
+
+
+# --- which events may write the default branch's cache scope ---------------
+#
+# Reported by a reader of the write-up, who pointed out that
+# `pull_request_target` has the default branch as its GITHUB_REF and therefore
+# looked like it belonged in the write list. The premise is right and the
+# conclusion is wrong -- GitHub gates cache writes on an event allow-list, not
+# on the ref or on what the run can reach. Checking it found `workflow_run`
+# sitting in the list, where it never belonged.
+
+def _cache_after_untrusted(trigger_block, ref_expr):
+    return analyse("""
+on:
+""" + trigger_block + """
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1234567890abcdef1234567890abcdef12345678
+        with:
+          ref: """ + ref_expr + """
+      - uses: actions/cache@1234567890abcdef1234567890abcdef12345678
+        with:
+          key: build-x
+          path: target/
+""")
+
+
+def test_workflow_run_cannot_write_the_default_branch_cache_scope():
+    """GitHub names workflow_run as low-trust with read-only access to the
+    default branch's cache scope, despite it holding secrets and a write
+    token. Privilege and cache-write permission are separate things."""
+    findings = _cache_after_untrusted(
+        "  workflow_run:\n    workflows: [CI]\n    types: [completed]",
+        "${{ github.event.workflow_run.head_sha }}")
+    assert "GHAST023" not in rule_ids(findings)
+
+
+def test_pull_request_target_cannot_write_the_default_branch_cache_scope():
+    """Its GITHUB_REF *is* the default branch and it *does* check out fork code
+    with secrets -- and it still cannot write the cache."""
+    findings = _cache_after_untrusted(
+        "  pull_request_target:",
+        "${{ github.event.pull_request.head.sha }}")
+    assert "GHAST023" not in rule_ids(findings)
+
+
+def test_push_can_write_the_default_branch_cache_scope():
+    findings = _cache_after_untrusted(
+        "  push:\n    branches: [main]",
+        "refs/pull/${{ github.event.inputs.pr }}/merge")
+    assert "GHAST023" in rule_ids(findings)
 
 
 def test_cache_written_before_the_untrusted_checkout_is_clean():

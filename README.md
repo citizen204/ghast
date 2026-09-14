@@ -190,7 +190,8 @@ this number was written down. The hardened examples in
 the true-positive count: a scanner that flags the documented fix is one nobody runs
 twice.
 
-Twelve rules exist in their current form *because* of that exercise. Each case is pinned
+Thirteen rules exist in their current form *because* of that exercise, the last of
+them reported by a reader. Each case is pinned
 as a regression test in [`tests/test_rules.py`](tests/test_rules.py), named after the
 repository that found it, and the whole exercise is written up in
 [**I built a GitHub Actions security scanner, then spent longer proving it
@@ -234,6 +235,15 @@ imprecise but factually wrong about how GitHub works:
   shape that is real: a job on a cache-writing trigger (`push`, `workflow_run`,
   `schedule`) that caches something *after* checking out a pull request head or unpacking
   an untrusted artifact.
+- **Cache-write permission is an event allow-list, not a privilege level.** A reader of
+  the write-up pointed out that `pull_request_target` has the default branch as its
+  `GITHUB_REF`, and asked whether it therefore belonged in the replacement rule's
+  write-scope list. The premise is right; the conclusion is not — GitHub gates cache
+  writes on an explicit list of events and names `pull_request_target`, `issue_comment`
+  and `workflow_run` as read-only against the default branch's scope. Checking it found
+  `workflow_run` sitting in that list in `ghast`, where it never belonged, put there by
+  the same wrong assumption: that holding secrets and a write token implies being able
+  to write the cache.
 - **An actor check is not always spelled `github.actor`.** Stirling-Tools/Stirling-PDF
   allow-lists eight maintainer logins through `github.event.comment.user.login`, which is
   the field an `issue_comment` workflow actually cares about. Matching only `github.actor`

@@ -403,11 +403,26 @@ def artifact_poisoning(ctx: Context) -> Iterable[Finding]:
     return findings
 
 
-#: Events whose runs may create or overwrite caches in the default branch's
-#: scope.  Pull requests deliberately cannot, which is why they are absent.
+#: Events whose runs may create or overwrite caches in the *default branch's*
+#: scope.  Taken verbatim from GitHub's caching reference rather than inferred:
+#: https://docs.github.com/en/actions/reference/dependency-caching-reference
+#:
+#: The trap here is assuming that "runs with secrets and a write token" implies
+#: "may write the default branch's cache scope".  It does not.  GitHub gates
+#: cache writes on an explicit allow-list of *events*, independent of what the
+#: run can otherwise reach, and names `pull_request_target`, `issue_comment`
+#: and `workflow_run` as low-trust with read-only access to that scope --
+#: because each of them can be influenced from outside the repository.
+#:
+#: `pull_request_target` is the one that most looks like it belongs here: its
+#: GITHUB_REF really is the default branch, and it really does check out fork
+#: code with secrets in scope.  It still cannot write the cache.  (Thanks to
+#: Vinh Nguyen, who raised exactly that case on the write-up and sent me to
+#: check -- the answer was no, but checking found `workflow_run` sitting in
+#: this list where it never belonged.)
 _CACHE_WRITING_EVENTS = frozenset({
-    "push", "workflow_dispatch", "repository_dispatch", "schedule",
-    "workflow_run", "release", "merge_group",
+    "push", "workflow_dispatch", "repository_dispatch", "delete",
+    "registry_package", "page_build", "schedule",
 })
 
 
