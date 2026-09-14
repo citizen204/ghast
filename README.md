@@ -190,8 +190,12 @@ this number was written down. The hardened examples in
 the true-positive count: a scanner that flags the documented fix is one nobody runs
 twice.
 
-Several rules exist in their current form *because* of that exercise, and the cases are
-pinned as regression tests in [`tests/test_rules.py`](tests/test_rules.py):
+Twelve rules exist in their current form *because* of that exercise. Each case is pinned
+as a regression test in [`tests/test_rules.py`](tests/test_rules.py), named after the
+repository that found it, and the whole exercise is written up in
+[**I built a GitHub Actions security scanner, then spent longer proving it
+wrong**](docs/WRONG-TWELVE-TIMES.md) — including the one where the tool was not merely
+imprecise but factually wrong about how GitHub works:
 
 - **`npm install -g <pinned-package>` is not repo code.** A substring match on
   `"npm install"` called a generated Kibana workflow a critical. Whether a command
