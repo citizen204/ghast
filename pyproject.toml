@@ -20,7 +20,7 @@ classifiers = [
 dependencies = ["PyYAML>=5.4"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=9.1.1"]
 
 [project.scripts]
 ghast = "ghast.cli:main"
