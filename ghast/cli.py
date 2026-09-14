@@ -71,8 +71,15 @@ def build_parser() -> argparse.ArgumentParser:
                       help="restrict --top to one language, e.g. go, python, rust")
     hunt.add_argument("--min-stars", type=int, default=5000,
                       help="star floor for --top (default: 5000)")
+    hunt.add_argument("--max-stars", type=int, metavar="N",
+                      help="star ceiling for --top. Pair with --min-stars to sweep the "
+                           "long tail, where projects have the same CI complexity as the "
+                           "top of the list and far less security attention")
     hunt.add_argument("--ref", help="git ref to read workflows from")
-    hunt.add_argument("--workers", type=int, default=6, help="parallel requests (default: 6)")
+    hunt.add_argument("--workers", type=int, default=4,
+                  help="parallel requests (default: 4). GitHub enforces a secondary "
+                       "limit on burst concurrency separately from the hourly quota, "
+                       "so raising this is often slower overall")
     _add_filter_args(hunt)
 
     rules = sub.add_parser("rules", help="list the rules this build knows about")
@@ -170,7 +177,8 @@ def cmd_hunt(args: argparse.Namespace) -> int:
             return 2
     if args.top:
         try:
-            repos.extend(top_repos(args.language, args.top, args.min_stars))
+            repos.extend(top_repos(args.language, args.top, args.min_stars,
+                                   args.max_stars))
         except GhError as exc:
             print("ghast: {}".format(exc), file=sys.stderr)
             return 2

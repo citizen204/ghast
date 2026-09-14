@@ -137,3 +137,38 @@ def test_a_repository_without_workflows_is_not_an_error():
     assert "1 repositories scanned" in line
     assert "1 use no GitHub Actions" in line
     assert "1 could not be read" in line
+
+
+def test_rate_limiting_is_distinct_from_failure():
+    """GitHub throttles burst concurrency separately from the hourly quota, so
+    a scan can be blocked while `rate_limit` still reports 5000 remaining.
+    Reporting that as "could not be read" sends people chasing the wrong
+    problem."""
+    from ghast.hunt import RateLimited, RepoResult, summarise, to_scan_result
+
+    results = [
+        RepoResult(repo="a/ok", files=4),
+        RepoResult(repo="b/none", no_workflows=True),
+        RepoResult(repo="c/throttled", rate_limited=True, error="HTTP 403 rate limit"),
+        RepoResult(repo="d/broken", error="boom"),
+    ]
+    assert results[2].status == "rate limited — not scanned"
+    line = summarise(results)
+    assert "1 throttled by GitHub" in line
+    assert "1 could not be read" in line
+
+    scan_result = to_scan_result(results)
+    joined = " ".join(scan_result.parse_errors)
+    assert "d/broken" in joined
+    assert "throttled the scan" in joined
+    # The throttled repo is not listed as a per-repo failure.
+    assert "c/throttled:" not in joined
+
+
+def test_rate_limited_errors_are_classified_from_gh_output():
+    import ghast.hunt as hunt
+
+    for message in ("HTTP 403: API rate limit exceeded for user ID 1",
+                    "You have exceeded a secondary rate limit",
+                    "was submitted too quickly"):
+        assert any(m in message.lower() for m in hunt._RATE_LIMIT_MARKERS), message
