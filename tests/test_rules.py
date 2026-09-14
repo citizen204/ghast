@@ -198,32 +198,63 @@ jobs:
     assert "GHAST022" in rule_ids(findings)
 
 
-def test_cache_poisoning_on_fork_pr():
+def test_ordinary_pr_caching_is_not_poisoning():
+    """GitHub scopes a pull request's caches to `refs/pull/N/merge` and gives
+    low-trust triggers read-only access to the default branch's scope, so a
+    plain `actions/cache` step in fork CI cannot poison anything. Flagging it
+    produced 60 of 61 medium findings in one long-tail sweep -- all wrong."""
     findings = analyse("""
 on: pull_request
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/cache@v4
+      - uses: actions/cache@1234567890abcdef1234567890abcdef12345678
         with:
           key: deps-${{ hashFiles('**/lock') }}
           path: ~/.cache
 """)
-    assert "GHAST023" in rule_ids(findings)
+    assert "GHAST023" not in rule_ids(findings)
 
 
-def test_cache_restore_only_is_not_flagged():
+def test_cache_written_after_untrusted_checkout_on_a_trusted_trigger():
+    """The shape that is actually dangerous: a trigger that *can* write the
+    default branch's cache scope, in a job that first checked out a PR head."""
     findings = analyse("""
-on: pull_request
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/cache/restore@v4
+      - uses: actions/checkout@1234567890abcdef1234567890abcdef12345678
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/cache@1234567890abcdef1234567890abcdef12345678
+        with:
+          key: build-${{ github.sha }}
+          path: target/
+""")
+    finding = of_rule(findings, "GHAST023")[0]
+    assert any("may write the default branch's cache scope" in n
+               for n in finding.factors.notes)
+    assert any("checked out" in n for n in finding.factors.notes)
+
+
+def test_cache_written_before_the_untrusted_checkout_is_clean():
+    findings = analyse("""
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache@1234567890abcdef1234567890abcdef12345678
         with:
           key: deps
           path: ~/.cache
+      - run: make build
 """)
     assert "GHAST023" not in rule_ids(findings)
 

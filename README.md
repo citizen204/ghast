@@ -221,6 +221,15 @@ pinned as regression tests in [`tests/test_rules.py`](tests/test_rules.py):
   job's own `if:` reported a carefully hardened workflow as a critical pwn request.
   `ghast` walks the dependency graph, and stops inheriting when a job opts out of the
   skip with `always()` or `!cancelled()`.
+- **The cache-poisoning rule was making a false claim.** It fired on any `actions/cache`
+  step in a `pull_request` workflow, asserting that fork CI can seed a cache the default
+  branch later restores. GitHub scopes a pull request's caches to `refs/pull/N/merge`,
+  which nothing else restores, and gives low-trust triggers read-only access to the
+  default branch's scope — so that cannot happen. The rule produced 60 of 61 medium
+  findings in one long-tail sweep, every one of them wrong, and is now narrowed to the
+  shape that is real: a job on a cache-writing trigger (`push`, `workflow_run`,
+  `schedule`) that caches something *after* checking out a pull request head or unpacking
+  an untrusted artifact.
 - **An actor check is not always spelled `github.actor`.** Stirling-Tools/Stirling-PDF
   allow-lists eight maintainer logins through `github.event.comment.user.login`, which is
   the field an `issue_comment` workflow actually cares about. Matching only `github.actor`

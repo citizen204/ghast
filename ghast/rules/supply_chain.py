@@ -80,20 +80,30 @@ ARTIFACT_POISONING = register(RuleMeta(
 CACHE_POISONING = register(RuleMeta(
     id="GHAST023",
     name="cache-poisoning",
-    summary="A fork-triggered job writes to a cache that privileged jobs restore",
+    summary="A privileged job writes a cache after ingesting untrusted content",
     description=(
-        "Actions caches are scoped to a branch but fall back to the default branch, and a "
-        "job running a fork pull request can create cache entries. A privileged workflow "
-        "on the default branch that restores the same key can therefore be handed "
-        "attacker-written files -- compiled artifacts, node_modules, toolchains -- which it "
-        "then executes."
+        "GitHub scopes caches by ref and shares them downward only. A pull request run "
+        "writes to `refs/pull/N/merge`, which nothing else restores, and low-trust "
+        "triggers get read-only access to the default branch's scope -- so an ordinary "
+        "`actions/cache` step in fork CI cannot poison anything, and flagging it is "
+        "wrong. The real vector is the opposite shape: a job running under a trigger "
+        "that *can* write the default branch's scope -- `push`, `workflow_dispatch`, "
+        "`workflow_run`, `schedule` -- which has first checked out a pull request head or "
+        "unpacked an artifact from an untrusted run. Whatever that job caches is derived "
+        "from attacker-controlled input and is then restored by every later run on the "
+        "default branch."
     ),
     remediation=(
-        "Do not populate shared caches from fork pull request jobs. Use "
-        "`actions/cache/restore` with `lookup-only`/read-only semantics in untrusted jobs, "
-        "and include a trust boundary in the cache key."
+        "Do not populate a shared cache from a job that has ingested untrusted content. "
+        "Separate the two: build untrusted code in a `pull_request` job whose cache scope "
+        "is the pull request's own, and keep cache writes in jobs that only ever see "
+        "repository-owned sources. Where both are unavoidable, put a trust boundary in "
+        "the cache key so untrusted runs cannot collide with trusted ones."
     ),
-    references=(DOCS_ARTIFACT,),
+    references=(
+        "https://docs.github.com/en/actions/reference/dependency-caching-reference",
+        DOCS_ARTIFACT,
+    ),
     tags=("supply-chain", "cache"),
 ))
 
@@ -393,45 +403,71 @@ def artifact_poisoning(ctx: Context) -> Iterable[Finding]:
     return findings
 
 
+#: Events whose runs may create or overwrite caches in the default branch's
+#: scope.  Pull requests deliberately cannot, which is why they are absent.
+_CACHE_WRITING_EVENTS = frozenset({
+    "push", "workflow_dispatch", "repository_dispatch", "schedule",
+    "workflow_run", "release", "merge_group",
+})
+
+
 @rule
 def cache_poisoning(ctx: Context) -> Iterable[Finding]:
     findings: List[Finding] = []
-    if "pull_request" not in ctx.events:
+    writing_events = sorted(_CACHE_WRITING_EVENTS & ctx.events)
+    if not writing_events:
         return findings
-    # A workflow that only ever runs on fork PRs is where poisoning originates.
+    from .privilege import _checkout_of_untrusted_head
+
     for job in ctx.wf.jobs.values():
+        # What made this job's inputs untrusted?
+        tainted_by: Optional[str] = None
+        tainted_index = -1
         for step in job.steps:
+            offending = _checkout_of_untrusted_head(step)
+            if offending:
+                tainted_by, tainted_index = "checked out " + offending, step.index
+                break
+            slug = (step.uses.full_path or "").lower() if step.uses else ""
+            if any(slug == a for a in knowledge.ARTIFACT_DOWNLOAD_ACTIONS):
+                tainted_by = "downloaded an artifact from an untrusted run"
+                tainted_index = step.index
+                break
+        if tainted_by is None:
+            continue
+
+        for step in job.steps:
+            if step.index <= tainted_index:
+                continue
             full = (step.uses.full_path or "").lower() if step.uses else ""
             if not any(full == c or full.startswith(c + "/") for c in knowledge.CACHE_ACTIONS):
                 continue
             with_ = step.with_ or {}
-            read_only = str(with_.get("lookup-only", "")).lower() == "true"
-            # `actions/cache/restore` only reads; it cannot poison anything.
-            if read_only or full.endswith("/restore"):
+            if str(with_.get("lookup-only", "")).lower() == "true" or full.endswith("/restore"):
                 continue
             key = str(with_.get("key", ""))
             notes = [
-                "this job runs for pull requests, including from forks",
-                "cache entries created here are visible to default-branch workflows "
-                "through the cache fallback rules",
+                "runs on `{}`, which may write the default branch's cache scope".format(
+                    ", ".join(writing_events)),
+                "earlier in this job it {}".format(tainted_by),
+                "anything cached here is derived from that input and is restored by "
+                "later runs on the default branch",
             ]
-            if "github.head_ref" in key or "github.ref" in key:
-                notes.append("the cache key includes a ref, which narrows but does not "
-                             "close the fallback path")
+            if key:
+                notes.append("cache key: {}".format(key[:120]))
             _note_guard(ctx, job, None, notes)
             findings.append(Finding(
                 rule_id=CACHE_POISONING.id,
-                title="Fork-triggered job populates a shared Actions cache",
+                title="Cache written after untrusted input in job `{}`".format(job.id),
                 path=ctx.wf.path, line=step.uses_pos.line, job=job.id, step=step.label,
                 message=_sentence(CACHE_POISONING.summary) + " " +
-                        _sentence(CACHE_POISONING.description, 1),
-                evidence="uses: {}{}".format(step.uses.raw if step.uses else "",
-                                             "  key: " + key if key else ""),
+                        _sentence(CACHE_POISONING.description, 2),
+                evidence="uses: {}".format(step.uses.raw if step.uses else ""),
                 remediation=CACHE_POISONING.remediation,
                 references=CACHE_POISONING.references,
                 tags=CACHE_POISONING.tags,
-                factors=ScoreFactors(impact=IMPACT_RUNNER * 1.2,
-                                     actor=ctx.trigger("pull_request").actor,
+                factors=ScoreFactors(impact=IMPACT_SECRETS_AND_WRITE * 0.7,
+                                     actor=worst_trigger(ctx.events, ctx).actor,
                                      confidence="likely",
                                      guard=job_guard(job, None, ctx), notes=notes),
                 fingerprint_extra="cache",
