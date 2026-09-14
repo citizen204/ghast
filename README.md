@@ -26,11 +26,12 @@ at every hop.
 
 ```bash
 git clone https://github.com/USERNAME/ghast && cd ghast
-pip install -e .
-ghast scan .
+make demo          # see it find things, and correctly not find things
+pip install -e .   # optional: puts `ghast` on your PATH
 ```
 
-No configuration, one dependency (PyYAML), Python 3.9+.
+No configuration, one dependency (PyYAML), Python 3.9+. Every `make` target runs
+from the source tree, so nothing needs installing first.
 
 ```bash
 ghast scan .                      # the current repository
@@ -281,10 +282,10 @@ which workflow calls them, so their triggers are assumed worst-case.
 ## Development
 
 ```bash
-pip install -e '.[dev]'
-pytest              # 89 tests
-ghast scan examples/vulnerable   # should report 10 criticals
-ghast scan examples/safe         # should report nothing
+make test     # 92 tests
+make demo     # examples/vulnerable reports 9 criticals; examples/safe reports nothing
+make scan     # ghast scanning its own workflows
+make hunt     # read-only sweep of the 25 most-starred public repositories
 ```
 
 `ghast` scans its own workflows in CI.
