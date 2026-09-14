@@ -1,5 +1,10 @@
 # I built a GitHub Actions security scanner, then spent longer proving it wrong
 
+*I'm a cybersecurity undergraduate at the University of Adelaide. I wrote this tool
+because I wanted to understand CI/CD supply-chain attacks properly, and the fastest way
+I know to find out whether you actually understand something is to build a thing that
+claims to.*
+
 The number that gave it away was 59 out of 61.
 
 I had just finished a sweep of 67 mid-sized open-source repositories — the kind
