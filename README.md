@@ -251,6 +251,45 @@ finding you have already triaged just because the file shifted.
 
 ---
 
+## Prior art, and why this exists anyway
+
+[**zizmor**](https://github.com/zizmorcore/zizmor) is the mature tool in this space and
+you should probably run it: Rust, ~38 audits, maintained by a Trail of Bits engineer,
+with a trophy case that includes CPython, cURL and Rust itself. It covers things `ghast`
+does not — impostor-commit detection being the obvious one. If you only run one scanner,
+run that one.
+
+Others worth knowing: [**actionlint**](https://github.com/rhysd/actionlint) (fast
+correctness linter, security is not its main job),
+[**poutine**](https://github.com/boostsecurityio/poutine) (BoostSecurity, broad
+supply-chain coverage across CI providers), and
+[**octoscan**](https://github.com/synacktiv/octoscan) (Synacktiv, offensive-leaning,
+strong on dangerous triggers and runner takeover).
+
+A 2026 survey of nine of these scanners
+([arXiv:2601.14455](https://arxiv.org/abs/2601.14455)) found that no single tool covers
+all weakness classes, and recommends layering. `ghast` is built for one of those layers,
+and it is deliberately narrow:
+
+**What it does differently.**
+
+- **Provenance, not just detection.** Taint is followed through workflow/job/step `env`,
+  `$GITHUB_ENV` and `$GITHUB_OUTPUT` writes, step outputs, job outputs and matrix
+  entries — and the resulting chain is *printed*, with a line number at every hop. A
+  four-hop flow that crosses a job boundary is reported as a four-hop flow, not as a
+  bare hit on the final line.
+- **Severity you can argue with.** Every score is
+  `impact × attacker-privilege × guard × confidence`, and `--explain` prints each factor
+  and the arithmetic. When you think a finding is overrated you can point at the
+  assumption rather than muting the rule.
+- **Hunting, not just guarding.** `ghast hunt` scans other people's public repositories
+  read-only and ranks the results, because finding this bug class at scale is a
+  different job from keeping it out of one repository.
+
+**What it does not do.** Fewer rules than zizmor. No impostor-commit detection. No
+auto-fix. Reusable workflows are not followed across the `uses:` boundary. It is young
+and has nothing like zizmor's field record. Version 0.1.0 means what it says.
+
 ## Design notes
 
 ```
