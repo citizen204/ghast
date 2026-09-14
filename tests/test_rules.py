@@ -656,3 +656,111 @@ def test_unresolvable_upstream_keeps_the_worst_case(tmp_path):
     findings = [f for f in result.findings if f.rule_id == "GHAST001"]
     assert findings
     assert findings[0].factors.actor == "any-github-user"
+
+
+# --- guards propagate down the needs graph ---------------------------------
+
+def _comment_ci(gate_if, downstream_if=""):
+    extra = "    if: {}\n".format(downstream_if) if downstream_if else ""
+    return """
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+jobs:
+  get-pr-number:
+    if: %s
+    runs-on: ubuntu-latest
+    outputs:
+      PR_NUMBER: ${{ steps.n.outputs.num }}
+    steps:
+      - id: n
+        run: echo "num=1" >> $GITHUB_OUTPUT
+  get-tests:
+    needs: [get-pr-number]
+%s    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1234567890abcdef1234567890abcdef12345678
+        with:
+          ref: "refs/pull/${{ needs.get-pr-number.outputs.PR_NUMBER }}/merge"
+          persist-credentials: false
+""" % (gate_if, extra)
+
+
+_ASSOC_GATE = ("${{ contains(fromJSON('[\"MEMBER\", \"OWNER\", \"COLLABORATOR\"]'), "
+               "github.event.comment.author_association) }}")
+
+
+def test_guard_on_an_upstream_job_protects_downstream_jobs():
+    """huggingface/transformers gates `get-pr-number` on author_association and
+    lets later jobs inherit it through `needs:`. GitHub skips a job whose
+    dependency was skipped, so those jobs do not repeat the condition."""
+    findings = analyse(_comment_ci(_ASSOC_GATE))
+    finding = of_rule(findings, "GHAST010")[0]
+    assert finding.factors.guard == "strong"
+    assert finding.severity in ("low", "info")
+    assert any("inherited through" in n for n in finding.factors.notes)
+
+
+def test_always_breaks_the_inheritance():
+    """`if: always()` runs the job even when its dependency was skipped, so the
+    upstream guard no longer holds it back."""
+    findings = analyse(_comment_ci(_ASSOC_GATE, downstream_if="${{ always() }}"))
+    finding = of_rule(findings, "GHAST010")[0]
+    assert finding.factors.guard is None
+    assert finding.severity == "critical"
+
+
+def test_ungated_upstream_inherits_nothing():
+    findings = analyse(_comment_ci("${{ github.event.issue.state == 'open' }}"))
+    finding = of_rule(findings, "GHAST010")[0]
+    assert finding.factors.guard is None
+    assert finding.severity == "critical"
+
+
+def test_inheritance_survives_a_cycle_in_needs():
+    """Malformed `needs:` must not hang the analysis."""
+    findings = analyse("""
+on: issue_comment
+jobs:
+  a:
+    needs: [b]
+    runs-on: ubuntu-latest
+    steps: [{run: echo a}]
+  b:
+    needs: [a]
+    runs-on: ubuntu-latest
+    steps: [{run: echo b}]
+""")
+    assert isinstance(findings, list)
+
+
+def test_third_party_managed_runner_is_reported_but_not_as_persistence():
+    """langchain-ai/langchain runs benchmarks on `codspeed-macro`. CodSpeed's
+    macro runners are dedicated bare metal for measurement consistency, which
+    is not the same claim as Blacksmith's per-job VMs -- so ghast reports it
+    and says what it cannot see, rather than guessing either way."""
+    findings = analyse("""
+on: pull_request
+jobs:
+  bench:
+    runs-on: codspeed-macro
+    steps: [{run: pytest --codspeed}]
+""")
+    finding = of_rule(findings, "GHAST030")[0]
+    assert finding.severity != "critical"
+    assert finding.factors.confidence == "likely"
+    assert "Third-party managed" in finding.title
+    assert any("provider's business" in n for n in finding.factors.notes)
+
+
+def test_ephemeral_managed_runner_is_still_silent():
+    findings = analyse("""
+on: pull_request
+jobs:
+  a:
+    runs-on: depot-ubuntu-24.04
+    steps: [{run: echo a}]
+""")
+    assert "GHAST030" not in rule_ids(findings)

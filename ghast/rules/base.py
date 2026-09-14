@@ -208,6 +208,48 @@ def _delegated_guard(ctx: "Context", job: Optional[Job]) -> Optional[guards.Guar
     )
 
 
+#: `if:` conditions that make a job run even when something it needs was
+#: skipped.  They break the inheritance below, because the guard upstream no
+#: longer keeps this job from starting.
+_RUNS_ANYWAY = re.compile(r"\balways\s*\(\s*\)|!\s*cancelled\s*\(\s*\)|"
+                          r"\bfailure\s*\(\s*\)", re.IGNORECASE)
+
+
+def _inherited_guards(ctx: "Context", job: Job,
+                      _seen: Optional[Set[str]] = None) -> List[guards.Guard]:
+    """Guards on jobs this one waits for.
+
+    GitHub skips a job when anything in its `needs:` was skipped, so an
+    authorisation check on an upstream job protects everything downstream of it
+    without those jobs repeating the condition.  huggingface/transformers gates
+    `get-pr-number` on `author_association` and lets six later jobs inherit it
+    through `needs:` -- reading only each job's own `if:` reports that
+    workflow, correctly hardened, as a critical pwn request.
+
+    The inheritance does not hold if this job opts out of the skip with
+    `always()` or `!cancelled()`.
+    """
+    if _RUNS_ANYWAY.search(job.if_ or ""):
+        return []
+    seen = _seen if _seen is not None else set()
+    found: List[guards.Guard] = []
+    for dep_id in job.needs:
+        if dep_id in seen:
+            continue
+        seen.add(dep_id)
+        dep = ctx.wf.jobs.get(dep_id)
+        if dep is None:
+            continue
+        for guard in guards.classify(dep.if_):
+            found.append(guards.Guard(
+                guard.strength,
+                "{} (inherited through `needs: {}`, which is skipped otherwise)".format(
+                    guard.description, dep_id),
+            ))
+        found.extend(_inherited_guards(ctx, dep, seen))
+    return found
+
+
 def _best_guard(ctx: Optional["Context"], job: Optional[Job],
                 step: Optional[Step]) -> Optional[guards.Guard]:
     candidates: List[Optional[guards.Guard]] = []
@@ -219,6 +261,8 @@ def _best_guard(ctx: Optional["Context"], job: Optional[Job],
     candidates.append(guards.strongest(conditions))
     if ctx is not None:
         candidates.append(_delegated_guard(ctx, job))
+        if job is not None:
+            candidates.extend(_inherited_guards(ctx, job))
     found = [g for g in candidates if g is not None]
     if not found:
         return None

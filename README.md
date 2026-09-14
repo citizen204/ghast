@@ -215,6 +215,17 @@ pinned as regression tests in [`tests/test_rules.py`](tests/test_rules.py):
   `ENTRY="- ${PR_TITLE} ..."` is a string assignment, not an invocation. The
   assignment-prefix match saw `ENTRY="-` plus a space and called a correctly hardened
   workflow a high-severity execution sink.
+- **Guards propagate down the `needs:` graph.** huggingface/transformers gates one job
+  on `author_association` and lets six later jobs inherit it — GitHub skips a job whose
+  dependency was skipped, so those jobs do not repeat the condition. Reading only each
+  job's own `if:` reported a carefully hardened workflow as a critical pwn request.
+  `ghast` walks the dependency graph, and stops inheriting when a job opts out of the
+  skip with `always()` or `!cancelled()`.
+- **Not every third-party runner is ephemeral.** Blacksmith and Depot destroy the VM
+  after each job; CodSpeed's macro runners are dedicated bare metal whose purpose is
+  hardware consistency, which is a different claim. `ghast` keeps three classes and, for
+  the middle one, reports the finding while saying plainly that whether state survives is
+  the provider's business and is not visible in the workflow file.
 - **`workflow_run` reachability is a property of the *other* workflow.** A deployment
   pipeline that interpolates `workflow_run.head_branch` is a real injection shape, but if
   the workflow that triggers it only runs on `push`, the branch name comes from someone

@@ -83,17 +83,33 @@ def self_hosted_untrusted(ctx: Context) -> Iterable[Finding]:
         if not job.is_self_hosted:
             continue
         labels = job.runs_on_group or ", ".join(job.runs_on) or "(unresolved)"
+        if job.runs_on_group:
+            labels = "group: " + labels
+        third_party = job.runner_class == knowledge.RUNNER_THIRD_PARTY
+        impact = IMPACT_PERSISTENCE
+        confidence = "certain"
         notes = [
             "reachable via `{}`, which any GitHub user can fire".format(trigger.name),
             "runner labels: {}".format(labels),
-            "state left on the machine survives into later jobs",
         ]
+        if third_party:
+            impact *= 0.6
+            confidence = "likely"
+            notes.append(
+                "`{}` is a third-party managed runner, not one of this repository's own "
+                "machines. Whether it is torn down between jobs is the provider's "
+                "business and is not visible here -- if it is ephemeral, the persistence "
+                "argument below does not apply".format(labels)
+            )
+        else:
+            notes.append("state left on the machine survives into later jobs")
         if trigger.secrets:
             notes.append("this trigger also grants repository secrets")
         _note_guard(ctx, job, None, notes)
         findings.append(Finding(
             rule_id=SELF_HOSTED_PUBLIC.id,
-            title="Self-hosted runner is reachable by `{}`".format(trigger.name),
+            title="{} runner is reachable by `{}`".format(
+                "Third-party managed" if third_party else "Self-hosted", trigger.name),
             path=ctx.wf.path, line=job.runs_on_pos.line, job=job.id,
             message=_sentence(SELF_HOSTED_PUBLIC.summary) + " " +
                     _sentence(SELF_HOSTED_PUBLIC.description, 1),
@@ -102,7 +118,7 @@ def self_hosted_untrusted(ctx: Context) -> Iterable[Finding]:
             references=SELF_HOSTED_PUBLIC.references,
             tags=SELF_HOSTED_PUBLIC.tags,
             factors=ScoreFactors(
-                impact=IMPACT_PERSISTENCE, actor=trigger.actor,
+                impact=impact, actor=trigger.actor, confidence=confidence,
                 guard=job_guard(job, None, ctx), notes=notes,
             ),
             fingerprint_extra="self-hosted",

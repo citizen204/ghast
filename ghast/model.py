@@ -157,27 +157,34 @@ class Job:
         Deliberately *not* included: GitHub's own larger runners, and the
         managed-ephemeral providers, whose VMs are destroyed after each job.
         """
-        from .knowledge import is_hosted_runner_label, is_managed_runner_label
+        return self.runner_class in ("self-hosted", "third-party-managed")
+
+    @property
+    def runner_class(self) -> str:
+        """hosted | ephemeral-managed | third-party-managed | self-hosted."""
+        from . import knowledge
 
         if self.runs_on_group:
-            return True
+            return knowledge.RUNNER_SELF_HOSTED
+        classes = []
         for label in self.runs_on:
-            low = label.strip().strip("\"'").lower()
-            if low == "self-hosted":
-                return True
-            if "${{" in label or not low:
+            if "${{" in label or not label.strip():
                 continue
-            if is_hosted_runner_label(low) or is_managed_runner_label(low):
-                continue
-            return True
-        return False
+            classes.append(knowledge.classify_runner_label(label))
+        if not classes:
+            return knowledge.RUNNER_HOSTED
+        for kind in (knowledge.RUNNER_SELF_HOSTED, knowledge.RUNNER_THIRD_PARTY,
+                     knowledge.RUNNER_EPHEMERAL):
+            if kind in classes:
+                return kind
+        return knowledge.RUNNER_HOSTED
 
     @property
     def managed_runner(self) -> Optional[str]:
-        from .knowledge import is_managed_runner_label
+        from . import knowledge
 
         for label in self.runs_on:
-            if is_managed_runner_label(label):
+            if knowledge.is_managed_runner_label(label):
                 return label.strip()
         return None
 

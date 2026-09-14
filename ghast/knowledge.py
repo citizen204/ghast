@@ -227,16 +227,25 @@ CODE_LOADING_ENV_VARS: FrozenSet[str] = frozenset(
     }
 )
 
-#: Third-party providers of *ephemeral* managed runners.  A job on one of these
-#: gets a fresh VM that is destroyed afterwards, so the persistence argument
-#: behind the self-hosted rule does not apply.  They are still third-party
-#: infrastructure with their own trust story, but calling them "self-hosted"
-#: produces a wall of false criticals on repositories that are doing something
-#: reasonable.
-MANAGED_RUNNER_PREFIXES: Tuple[str, ...] = (
+#: Third-party providers whose runners are destroyed after every job.  The
+#: persistence argument behind the self-hosted rule does not apply to them:
+#: there is nothing for an attacker to leave behind.  They are still someone
+#: else's infrastructure in your build path, but calling them "self-hosted"
+#: produces a wall of false criticals on repositories doing something sensible.
+EPHEMERAL_RUNNER_PREFIXES: Tuple[str, ...] = (
     "blacksmith-", "blacksmith", "warp-", "depot-", "namespace-profile-",
     "nscloud-", "buildjet-", "ubicloud-", "ubicloud", "runs-on-", "actuated-",
-    "cirun-", "hosted-", "codebuild-", "sprinters-", "k8s-runner",
+    "cirun-", "hosted-", "codebuild-", "sprinters-",
+)
+
+#: Third-party managed runners that are *not* advertised as per-job ephemeral.
+#: CodSpeed's macro runners, for instance, are dedicated bare-metal machines
+#: whose entire purpose is hardware consistency between runs -- which argues
+#: against tearing them down. Whether state survives is the provider's
+#: business and is not visible in the workflow file, so ghast reports these
+#: rather than silently clearing them, and says plainly what it does not know.
+THIRD_PARTY_RUNNER_PREFIXES: Tuple[str, ...] = (
+    "codspeed-", "codspeed",
 )
 
 #: Prefixes GitHub itself uses, including the larger-runner naming convention.
@@ -244,15 +253,35 @@ HOSTED_RUNNER_PREFIXES: Tuple[str, ...] = (
     "ubuntu-", "windows-", "macos-", "ubuntu_", "macos_", "windows_",
 )
 
+RUNNER_HOSTED = "hosted"
+RUNNER_EPHEMERAL = "ephemeral-managed"
+RUNNER_THIRD_PARTY = "third-party-managed"
+RUNNER_SELF_HOSTED = "self-hosted"
+
+
+def _clean_label(label: str) -> str:
+    return label.strip().strip("\"'").lower()
+
+
+def classify_runner_label(label: str) -> str:
+    low = _clean_label(label)
+    if low == "self-hosted":
+        return RUNNER_SELF_HOSTED
+    if any(low.startswith(p) for p in HOSTED_RUNNER_PREFIXES):
+        return RUNNER_HOSTED
+    if any(low.startswith(p) for p in EPHEMERAL_RUNNER_PREFIXES):
+        return RUNNER_EPHEMERAL
+    if any(low.startswith(p) for p in THIRD_PARTY_RUNNER_PREFIXES):
+        return RUNNER_THIRD_PARTY
+    return RUNNER_SELF_HOSTED
+
 
 def is_managed_runner_label(label: str) -> bool:
-    low = label.strip().strip("\"'").lower()
-    return any(low.startswith(prefix) for prefix in MANAGED_RUNNER_PREFIXES)
+    return classify_runner_label(label) in (RUNNER_EPHEMERAL, RUNNER_THIRD_PARTY)
 
 
 def is_hosted_runner_label(label: str) -> bool:
-    low = label.strip().strip("\"'").lower()
-    return any(low.startswith(prefix) for prefix in HOSTED_RUNNER_PREFIXES)
+    return classify_runner_label(label) == RUNNER_HOSTED
 
 
 #: Owners whose actions are maintained by GitHub itself.  Still worth pinning,
