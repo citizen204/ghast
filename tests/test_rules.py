@@ -853,3 +853,70 @@ jobs:
     finding = of_rule(findings, "GHAST022")[0]
     assert finding.factors.guard == "weak"
     assert any("not seen checking who the actor is" in n for n in finding.factors.notes)
+
+
+# --- an approval covers a commit, not a pull request -----------------------
+
+def _comment_deploy(gate, extra_job=""):
+    return """
+on:
+  issue_comment:
+    types: [created]
+jobs:
+  check-comment:
+    if: %s
+    runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.n.outputs.n }}
+    steps:
+      - id: n
+        run: echo "n=1" >> $GITHUB_OUTPUT
+%s  deploy:
+    needs: [check-comment]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1234567890abcdef1234567890abcdef12345678
+        with:
+          ref: "refs/pull/${{ needs.check-comment.outputs.pr_number }}/merge"
+      - run: echo "${{ secrets.DEPLOY_KEY }}" > /dev/null
+""" % (gate, extra_job)
+
+
+_LOGIN_ALLOWLIST = ("${{ github.event.comment.user.login == 'frooodle' || "
+                    "github.event.comment.user.login == 'Ludy87' }}")
+
+
+def test_comment_author_allowlist_is_a_strong_guard():
+    """Stirling-Tools/Stirling-PDF allow-lists eight maintainer logins via
+    `github.event.comment.user.login`. Matching only `github.actor` reported a
+    92k-star repository as an unguarded critical."""
+    findings = analyse(_comment_deploy(_LOGIN_ALLOWLIST))
+    finding = of_rule(findings, "GHAST010")[0]
+    assert finding.factors.guard == "strong"
+    assert finding.severity in ("low", "info")
+
+
+def test_mutable_ref_after_human_approval_is_called_out():
+    findings = analyse(_comment_deploy(_LOGIN_ALLOWLIST))
+    finding = of_rule(findings, "GHAST010")[0]
+    assert any("re-resolves" in n for n in finding.factors.notes)
+
+
+def test_a_freshness_check_in_a_needed_job_clears_the_race_note():
+    """huggingface/transformers rejects merge commits newer than the comment
+    that triggered the run, in a separate job reached through `needs:`."""
+    guard_job = """  check-timestamps:
+    needs: [check-comment]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify merge_commit timestamp is older than the comment
+        run: |
+          COMMENT_TIMESTAMP=$(date -d "$COMMENT_DATE" +"%s")
+          if [ $COMMENT_TIMESTAMP -le $PR_MERGE_COMMIT_TIMESTAMP ]; then exit 1; fi
+"""
+    text = _comment_deploy(_LOGIN_ALLOWLIST, guard_job).replace(
+        "needs: [check-comment]\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout",
+        "needs: [check-comment, check-timestamps]\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout")
+    findings = analyse(text)
+    finding = of_rule(findings, "GHAST010")[0]
+    assert not any("re-resolves" in n for n in finding.factors.notes)

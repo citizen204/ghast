@@ -20,6 +20,17 @@ class Guard:
     description: str
 
 
+#: Every expression that names *who triggered this run*.  Comparing any of
+#: them against a literal is an authorisation check.
+_ACTOR_FIELD_SRC = (
+    r"(?:github\.(?:triggering_)?actor"
+    r"|github\.event\.(?:comment|issue|pull_request|review|discussion|"
+    r"discussion_comment|review_comment|sender)?\.?(?:user\.)?login"
+    r"|github\.event\.sender\.login)"
+)
+_ACTOR_FIELD = re.compile(_ACTOR_FIELD_SRC + r"\s*==\s*'[^']+'")
+
+
 _PATTERNS = (
     (
         re.compile(r"github\.event\.pull_request\.head\.repo\.full_name\s*==\s*github\.repository"),
@@ -48,12 +59,18 @@ _PATTERNS = (
         "restricted by author association allow-list",
     ),
     (
-        re.compile(r"github\.actor\s*==\s*'[^']+'"),
+        # `github.actor`, but also the payload's own view of who acted:
+        # `github.event.comment.user.login` is the comment author, which is
+        # what an issue_comment workflow actually cares about.  Stirling-PDF
+        # allow-lists eight maintainer logins that way, and matching only
+        # `github.actor` reported it as an unguarded pwn request.
+        _ACTOR_FIELD,
         STRONG,
         "restricted to a named actor",
     ),
     (
-        re.compile(r"contains\(\s*fromJSON\([^)]*\)\s*,\s*github\.actor\s*\)", re.I),
+        re.compile(r"contains\(\s*fromJSON\([^)]*\)\s*,\s*" + _ACTOR_FIELD_SRC + r"\s*\)",
+                   re.I | re.S),
         STRONG,
         "restricted to an actor allow-list",
     ),

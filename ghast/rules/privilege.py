@@ -156,6 +156,60 @@ def _checkout_of_untrusted_head(step: Step) -> Optional[str]:
     return None
 
 
+#: `refs/pull/N/merge` and `head.ref` re-resolve every time they are fetched.
+#: A literal SHA does not.
+_MUTABLE_REF = re.compile(r"refs/pull/|head\.ref|head_branch|\.number\b", re.IGNORECASE)
+_PINNED_SHA = re.compile(r"head\.sha|head_sha|merge_commit_sha", re.IGNORECASE)
+
+
+_FRESHNESS = re.compile(r"timestamp|created_at|newer than|comment_date", re.IGNORECASE)
+
+
+def _has_freshness_check(ctx, job, _seen=None) -> bool:
+    """Does this job, or anything it waits for, compare commit and trigger times?
+
+    transformers puts that check in a separate `check-timestamps` job reached
+    through `needs:`, so looking only at the checkout job's own steps misses it.
+    """
+    seen = _seen if _seen is not None else set()
+    for step in job.steps:
+        haystack = " ".join(filter(None, [step.name or "", step.run or ""]))
+        if _FRESHNESS.search(haystack):
+            return True
+    for dep_id in job.needs:
+        if dep_id in seen:
+            continue
+        seen.add(dep_id)
+        dep = ctx.wf.jobs.get(dep_id)
+        if dep is not None and _has_freshness_check(ctx, dep, seen):
+            return True
+    return False
+
+
+def _approval_race_note(ctx, job, offending):
+    """A human opt-in approves a commit, not a pull request.
+
+    huggingface/transformers defends against this explicitly, with a job that
+    refuses to run when the merge commit is newer than the comment that
+    triggered it.  Stirling-Tools/Stirling-PDF allow-lists eight maintainer
+    logins and then checks out `refs/pull/N/merge`, which re-resolves -- so a
+    contributor can push after the maintainer types the magic word.  Both are
+    gated; only one closes the window.
+    """
+    if not _MUTABLE_REF.search(offending) or _PINNED_SHA.search(offending):
+        return None
+    comment_gated = any(e in ctx.events for e in
+                        ("issue_comment", "pull_request_review", "pull_request_review_comment"))
+    description = guard_description(job, None, ctx) or ""
+    label_gated = "label" in description
+    if not (comment_gated or label_gated):
+        return None
+    if _has_freshness_check(ctx, job):
+        return None
+    return ("the checkout ref re-resolves, so the approval covers whoever pushed last "
+            "rather than the commit that was approved -- compare the merge commit's "
+            "timestamp against the triggering comment to close that window")
+
 def _runs_untrusted_tooling(step: Step) -> Optional[str]:
     if step.run:
         found = knowledge.detect_repo_code_execution(step.run)
@@ -204,6 +258,9 @@ def pwn_requests(ctx: Context) -> Iterable[Finding]:
             ]
             if description:
                 notes.append("gated by an `if:` condition: {}".format(description))
+            race = _approval_race_note(ctx, job, offending)
+            if race:
+                notes.append(race)
             findings.append(Finding(
                 rule_id=PWN_REQUEST.id,
                 title="`{}` checks out untrusted pull request code".format(trigger.name),

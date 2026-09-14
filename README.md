@@ -221,6 +221,15 @@ pinned as regression tests in [`tests/test_rules.py`](tests/test_rules.py):
   job's own `if:` reported a carefully hardened workflow as a critical pwn request.
   `ghast` walks the dependency graph, and stops inheriting when a job opts out of the
   skip with `always()` or `!cancelled()`.
+- **An actor check is not always spelled `github.actor`.** Stirling-Tools/Stirling-PDF
+  allow-lists eight maintainer logins through `github.event.comment.user.login`, which is
+  the field an `issue_comment` workflow actually cares about. Matching only `github.actor`
+  reported a 92k-star repository as an unguarded critical pwn request.
+- **An approval covers a commit, not a pull request.** When a human opt-in (a comment, a
+  label) is followed by a checkout of `refs/pull/N/merge`, the ref re-resolves — so the
+  approval ends up covering whoever pushed last. `ghast` says so, unless the workflow
+  compares the merge commit's timestamp against the trigger, which
+  huggingface/transformers does in a separate job reached through `needs:`.
 - **A custom runner label is genuinely ambiguous.** Organisations name their
   GitHub-hosted larger runners whatever they like — `vscode-large-runners`,
   `gemini-cli-ubuntu-16-core` — and a self-hosted runner is also just a string. Nothing
