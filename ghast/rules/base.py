@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from .. import guards, knowledge
@@ -20,6 +20,10 @@ class Context:
     workflow: Workflow
     engine: TaintEngine
     errors: List[str] = field(default_factory=list)
+    #: Sibling workflows in the same repository: display name -> its events.
+    #: Empty when only one file was scanned, in which case an unresolvable
+    #: `workflow_run` keeps its worst-case reading.
+    index: Dict[str, Set[str]] = field(default_factory=dict)
 
     @property
     def wf(self) -> Workflow:
@@ -28,6 +32,43 @@ class Context:
     @property
     def events(self) -> Set[str]:
         return set(self.workflow.event_names)
+
+    def trigger(self, name: str) -> Trigger:
+        """The privilege this event grants *in this workflow*.
+
+        Identical to the static table except for `workflow_run`, whose
+        reachability is a property of the workflow that triggers it.
+        """
+        base = knowledge.trigger(name)
+        if name != "workflow_run":
+            return base
+        return self._resolve_workflow_run(base)
+
+    def _resolve_workflow_run(self, base: Trigger) -> Trigger:
+        spec = self.workflow.events.get("workflow_run")
+        names = spec.get("workflows") if isinstance(spec, dict) else None
+        if not isinstance(names, list) or not names or not self.index:
+            return base                      # unknown upstream: assume the worst
+        resolved_all = True
+        for raw in names:
+            if not isinstance(raw, str):
+                return base
+            events = self.index.get(raw.strip())
+            if events is None:
+                resolved_all = False         # upstream not in this scan
+                continue
+            if any(knowledge.trigger(e).outsider for e in events):
+                return base                  # one outsider-reachable parent is enough
+        if not resolved_all:
+            return base
+        return replace(
+            base,
+            outsider=False,
+            actor=knowledge.ACTOR_WRITE,
+            note="fires only after {}, which {} can start".format(
+                " / ".join("`{}`".format(n) for n in names),
+                "only someone with write access"),
+        )
 
 
 # --------------------------------------------------------------------------
@@ -97,10 +138,11 @@ def _trigger_reach(t: Trigger) -> Tuple[int, int, int]:
     return (1 if t.outsider else 0, 1 if t.secrets else 0, 1 if t.token_write else 0)
 
 
-def worst_trigger(events: Set[str]) -> Trigger:
+def worst_trigger(events: Set[str], ctx: Optional["Context"] = None) -> Trigger:
     if not events:
         return knowledge.UNKNOWN_TRIGGER
-    return max((knowledge.trigger(e) for e in events), key=_trigger_reach)
+    resolve = ctx.trigger if ctx is not None else knowledge.trigger
+    return max((resolve(e) for e in events), key=_trigger_reach)
 
 
 def triggers_for_flow(ctx: Context, flow: Flow) -> Trigger:
@@ -109,7 +151,7 @@ def triggers_for_flow(ctx: Context, flow: Flow) -> Trigger:
     candidates = ctx.events if allowed is None else (ctx.events & set(allowed))
     if not candidates:
         candidates = ctx.events
-    return worst_trigger(candidates)
+    return worst_trigger(candidates, ctx)
 
 
 def required_actor(source_actor: str, trigger: Trigger) -> str:

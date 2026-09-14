@@ -75,10 +75,10 @@ def self_hosted_untrusted(ctx: Context) -> Iterable[Finding]:
     findings: List[Finding] = []
     if ctx.wf.kind == "action":
         return findings
-    outsider_events = sorted(e for e in ctx.events if knowledge.trigger(e).outsider)
+    outsider_events = sorted(e for e in ctx.events if ctx.trigger(e).outsider)
     if not outsider_events:
         return findings
-    trigger = worst_trigger(set(outsider_events))
+    trigger = worst_trigger(set(outsider_events), ctx)
     for job in ctx.wf.jobs.values():
         if not job.is_self_hosted:
             continue
@@ -102,7 +102,7 @@ def self_hosted_untrusted(ctx: Context) -> Iterable[Finding]:
             references=SELF_HOSTED_PUBLIC.references,
             tags=SELF_HOSTED_PUBLIC.tags,
             factors=ScoreFactors(
-                impact=IMPACT_PERSISTENCE, actor=knowledge.ACTOR_ANY,
+                impact=IMPACT_PERSISTENCE, actor=trigger.actor,
                 guard=job_guard(job, None, ctx), notes=notes,
             ),
             fingerprint_extra="self-hosted",
@@ -135,7 +135,7 @@ def persisted_credentials(ctx: Context) -> Iterable[Finding]:
                 break
         if runner is None:
             continue
-        trigger = worst_trigger(ctx.events)
+        trigger = worst_trigger(ctx.events, ctx)
         findings.append(Finding(
             rule_id=PERSIST_CREDENTIALS.id,
             title="Job `{}` runs build tooling with a persisted git token".format(job.id),

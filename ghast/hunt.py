@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from . import model, taint
 from .findings import Finding
 from .rules import Context, run_all
-from .scan import ScanResult
+from .scan import ScanResult, build_index
 
 
 class GhError(RuntimeError):
@@ -123,6 +123,9 @@ def scan_repo(repo: str, ref: Optional[str] = None,
     if not entries:
         result.no_workflows = True
         return result
+    # Fetch and parse everything first: a `workflow_run` workflow can only be
+    # judged once the workflow that triggers it has been seen.
+    parsed = []
     for entry in entries[:max_files]:
         try:
             text = fetch_file(repo, entry["path"], ref)
@@ -132,10 +135,14 @@ def scan_repo(repo: str, ref: Optional[str] = None,
         workflow = model.parse_text(text, "{}:{}".format(repo, entry["path"]))
         result.files += 1
         result.workflows.append(workflow)
+        parsed.append(workflow)
+
+    index = build_index(parsed)
+    for workflow in parsed:
         if workflow.parse_error or not workflow.jobs:
             continue
         engine = taint.analyse(workflow)
-        ctx = Context(workflow=workflow, engine=engine)
+        ctx = Context(workflow=workflow, engine=engine, index=index)
         result.findings.extend(run_all(ctx))
     return result
 

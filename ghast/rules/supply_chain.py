@@ -116,7 +116,7 @@ _VERSION_TAG = re.compile(r"^v?\d+(\.\d+)*(-[\w.]+)?$")
 
 
 def _job_is_privileged(ctx: Context, job: Job) -> bool:
-    trigger = worst_trigger(ctx.events)
+    trigger = worst_trigger(ctx.events, ctx)
     if not trigger.secrets:
         return False
     permissions, _ = effective_permissions(ctx.wf, job)
@@ -126,7 +126,7 @@ def _job_is_privileged(ctx: Context, job: Job) -> bool:
 @rule
 def unpinned_actions(ctx: Context) -> Iterable[Finding]:
     findings: List[Finding] = []
-    trigger = worst_trigger(ctx.events) if ctx.wf.kind != "action" else knowledge.UNKNOWN_TRIGGER
+    trigger = worst_trigger(ctx.events, ctx) if ctx.wf.kind != "action" else knowledge.UNKNOWN_TRIGGER
     for job in ctx.wf.jobs.values():
         privileged = _job_is_privileged(ctx, job) if ctx.wf.kind != "action" else True
         for step in job.steps:
@@ -378,7 +378,8 @@ def artifact_poisoning(ctx: Context) -> Iterable[Finding]:
             remediation=ARTIFACT_POISONING.remediation,
             references=ARTIFACT_POISONING.references,
             tags=ARTIFACT_POISONING.tags,
-            factors=ScoreFactors(impact=impact, actor=knowledge.ACTOR_ANY,
+            factors=ScoreFactors(impact=impact,
+                                 actor=ctx.trigger("workflow_run").actor,
                                  guard=job_guard(job, None, ctx), confidence=confidence,
                                  notes=notes),
             fingerprint_extra="artifact",
@@ -424,7 +425,7 @@ def cache_poisoning(ctx: Context) -> Iterable[Finding]:
                 references=CACHE_POISONING.references,
                 tags=CACHE_POISONING.tags,
                 factors=ScoreFactors(impact=IMPACT_RUNNER * 1.2,
-                                     actor=knowledge.ACTOR_ANY,
+                                     actor=ctx.trigger("pull_request").actor,
                                      confidence="likely",
                                      guard=job_guard(job, None, ctx), notes=notes),
                 fingerprint_extra="cache",

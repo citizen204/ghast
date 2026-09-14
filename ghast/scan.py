@@ -15,6 +15,23 @@ _SKIP_DIRS = {".git", "node_modules", "vendor", ".venv", "venv", "__pycache__",
               "dist", "build", ".tox", ".mypy_cache", "target"}
 
 
+def build_index(workflows: Iterable[model.Workflow]) -> Dict[str, Set[str]]:
+    """Map each workflow's declared `name:` to the events that start it.
+
+    `on: workflow_run: workflows: ["Build"]` names its upstream by display
+    name, so answering "can an outsider cause this workflow to run?" means
+    looking at a *different file*.  Without this, every `workflow_run` has to
+    be assumed outsider-reachable, which is the safe default but turns
+    push-only deployment pipelines into false criticals.
+    """
+    index: Dict[str, Set[str]] = {}
+    for workflow in workflows:
+        if workflow.kind != "workflow" or not workflow.name:
+            continue
+        index.setdefault(workflow.name.strip(), set()).update(workflow.event_names)
+    return index
+
+
 @dataclass
 class ScanResult:
     findings: List[Finding] = field(default_factory=list)
@@ -80,15 +97,9 @@ def discover(root: str, include_actions: bool = True,
     return found
 
 
-def scan_file(path: str, display_path: Optional[str] = None) -> ScanResult:
+def analyse_workflow(workflow: model.Workflow,
+                     index: Optional[Dict[str, Set[str]]] = None) -> ScanResult:
     result = ScanResult()
-    try:
-        workflow = model.parse_file(path)
-    except OSError as exc:
-        result.parse_errors.append("{}: {}".format(path, exc))
-        return result
-    if display_path:
-        workflow.path = display_path
     result.files_scanned = 1
     result.workflows.append(workflow)
     if workflow.parse_error:
@@ -97,10 +108,23 @@ def scan_file(path: str, display_path: Optional[str] = None) -> ScanResult:
     if workflow.kind == "workflow" and not workflow.jobs:
         return result
     engine = taint.analyse(workflow)
-    ctx = Context(workflow=workflow, engine=engine)
+    ctx = Context(workflow=workflow, engine=engine, index=index or {})
     result.findings.extend(run_all(ctx))
     result.rule_errors.extend(ctx.errors)
     return result
+
+
+def scan_file(path: str, display_path: Optional[str] = None,
+              index: Optional[Dict[str, Set[str]]] = None) -> ScanResult:
+    try:
+        workflow = model.parse_file(path)
+    except OSError as exc:
+        result = ScanResult()
+        result.parse_errors.append("{}: {}".format(path, exc))
+        return result
+    if display_path:
+        workflow.path = display_path
+    return analyse_workflow(workflow, index)
 
 
 def scan_paths(paths: Sequence[str], include_actions: bool = True,
@@ -108,6 +132,10 @@ def scan_paths(paths: Sequence[str], include_actions: bool = True,
                exclude: Sequence[str] = ()) -> ScanResult:
     combined = ScanResult()
     seen: Set[str] = set()
+
+    # Two passes: everything is parsed before anything is analysed, so that a
+    # rule can ask about a workflow other than the one it is looking at.
+    parsed: List[model.Workflow] = []
     for root in paths:
         for path in discover(root, include_actions=include_actions, exclude=exclude):
             real = os.path.realpath(path)
@@ -120,12 +148,22 @@ def scan_paths(paths: Sequence[str], include_actions: bool = True,
                     display = os.path.relpath(path, relative_to)
                 except ValueError:
                     pass
-            single = scan_file(path, display_path=display)
-            combined.findings.extend(single.findings)
-            combined.files_scanned += single.files_scanned
-            combined.parse_errors.extend(single.parse_errors)
-            combined.rule_errors.extend(single.rule_errors)
-            combined.workflows.extend(single.workflows)
+            try:
+                workflow = model.parse_file(path)
+            except OSError as exc:
+                combined.parse_errors.append("{}: {}".format(path, exc))
+                continue
+            workflow.path = display
+            parsed.append(workflow)
+
+    index = build_index(parsed)
+    for workflow in parsed:
+        single = analyse_workflow(workflow, index)
+        combined.findings.extend(single.findings)
+        combined.files_scanned += single.files_scanned
+        combined.parse_errors.extend(single.parse_errors)
+        combined.rule_errors.extend(single.rule_errors)
+        combined.workflows.extend(single.workflows)
     return combined
 
 

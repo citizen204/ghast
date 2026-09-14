@@ -211,6 +211,16 @@ pinned as regression tests in [`tests/test_rules.py`](tests/test_rules.py):
 - **Delegated permission gates are recognised.** The
   `needs.check-permissions.outputs.is_authorized == 'true'` pattern is a real control,
   and `ghast` checks that the gate job actually inspects the actor before crediting it.
+- **Quoting decides whether command position is possible.**
+  `ENTRY="- ${PR_TITLE} ..."` is a string assignment, not an invocation. The
+  assignment-prefix match saw `ENTRY="-` plus a space and called a correctly hardened
+  workflow a high-severity execution sink.
+- **`workflow_run` reachability is a property of the *other* workflow.** A deployment
+  pipeline that interpolates `workflow_run.head_branch` is a real injection shape, but if
+  the workflow that triggers it only runs on `push`, the branch name comes from someone
+  who already has write access. `ghast` resolves the upstream workflow by the name in
+  `on.workflow_run.workflows` and scores accordingly — critical when the parent is
+  fork-reachable, low when it is not, and worst-case when it cannot be resolved.
 
 ---
 

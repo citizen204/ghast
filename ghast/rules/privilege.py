@@ -172,7 +172,7 @@ def _runs_untrusted_tooling(step: Step) -> Optional[str]:
 
 
 def _is_privileged(ctx: Context) -> bool:
-    trigger = worst_trigger(ctx.events)
+    trigger = worst_trigger(ctx.events, ctx)
     return trigger.outsider and trigger.secrets
 
 
@@ -183,11 +183,11 @@ def pwn_requests(ctx: Context) -> Iterable[Finding]:
         return findings
     privileged_events = sorted(
         e for e in ctx.events
-        if knowledge.trigger(e).outsider and knowledge.trigger(e).secrets
+        if ctx.trigger(e).outsider and ctx.trigger(e).secrets
     )
     if not privileged_events:
         return findings
-    trigger = worst_trigger(set(privileged_events))
+    trigger = worst_trigger(set(privileged_events), ctx)
 
     for job in ctx.wf.jobs.values():
         guard = job_guard(job, None, ctx)
@@ -216,7 +216,7 @@ def pwn_requests(ctx: Context) -> Iterable[Finding]:
                 references=PWN_REQUEST.references,
                 tags=PWN_REQUEST.tags,
                 factors=ScoreFactors(
-                    impact=IMPACT_SECRETS_AND_WRITE, actor=knowledge.ACTOR_ANY,
+                    impact=IMPACT_SECRETS_AND_WRITE, actor=trigger.actor,
                     guard=guard, notes=notes,
                 ),
                 fingerprint_extra="checkout",
@@ -247,7 +247,7 @@ def pwn_requests(ctx: Context) -> Iterable[Finding]:
                 references=PWN_REQUEST_EXEC.references,
                 tags=PWN_REQUEST_EXEC.tags,
                 factors=ScoreFactors(
-                    impact=IMPACT_SECRETS_AND_WRITE, actor=knowledge.ACTOR_ANY,
+                    impact=IMPACT_SECRETS_AND_WRITE, actor=trigger.actor,
                     guard=guard, notes=notes,
                 ),
                 fingerprint_extra="tooling:" + tooling,
@@ -267,7 +267,7 @@ def permissions_hygiene(ctx: Context) -> Iterable[Finding]:
     findings: List[Finding] = []
     if ctx.wf.kind == "action" or not ctx.wf.jobs:
         return findings
-    trigger = worst_trigger(ctx.events)
+    trigger = worst_trigger(ctx.events, ctx)
 
     groups: "dict" = {}
     for job in ctx.wf.jobs.values():
@@ -341,7 +341,7 @@ def secrets_with_untrusted_code(ctx: Context) -> Iterable[Finding]:
     findings: List[Finding] = []
     if ctx.wf.kind == "action":
         return findings
-    if not any(knowledge.trigger(e).outsider and knowledge.trigger(e).secrets
+    if not any(ctx.trigger(e).outsider and ctx.trigger(e).secrets
                for e in ctx.events):
         return findings
     for job in ctx.wf.jobs.values():
@@ -371,7 +371,8 @@ def secrets_with_untrusted_code(ctx: Context) -> Iterable[Finding]:
             references=SECRETS_WITH_UNTRUSTED_CODE.references,
             tags=SECRETS_WITH_UNTRUSTED_CODE.tags,
             factors=ScoreFactors(
-                impact=IMPACT_SECRETS_AND_WRITE, actor=knowledge.ACTOR_ANY,
+                impact=IMPACT_SECRETS_AND_WRITE,
+                actor=worst_trigger(ctx.events, ctx).actor,
                 guard=job_guard(job, None, ctx),
                 notes=_note_guard(ctx, job, None,
                     ["job references a named secret and checks out the pull request head"]),
@@ -401,7 +402,7 @@ def bulk_secret_exposure(ctx: Context) -> Iterable[Finding]:
                 tags=SECRET_EXPOSURE.tags,
                 factors=ScoreFactors(
                     impact=IMPACT_SECRETS_AND_WRITE * 0.7,
-                    actor=worst_trigger(ctx.events).actor,
+                    actor=worst_trigger(ctx.events, ctx).actor,
                     notes=["log masking only redacts exact matches of each secret"],
                 ),
                 fingerprint_extra="tojson-secrets",

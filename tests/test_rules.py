@@ -566,3 +566,93 @@ jobs:
 """)
     injection = [f for f in findings if f.rule_id.startswith("GHAST00")]
     assert injection == [], [f.rule_id + " @" + str(f.line) for f in injection]
+
+
+# --- workflow_run reachability depends on the workflow that triggers it -----
+
+_UPSTREAM_PUSH_ONLY = """
+name: Build and publish
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: [{run: make build}]
+"""
+
+_UPSTREAM_FORK_PR = """
+name: Build and publish
+on:
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: [{run: make build}]
+"""
+
+_DOWNSTREAM = """
+name: Continuous Deployment
+on:
+  workflow_run:
+    workflows: ["Build and publish"]
+    types: [completed]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - id: tag
+        env:
+          PUBLISHED_REF: ${{ github.event.workflow_run.head_branch }}
+        run: echo "tag=$PUBLISHED_REF" >> $GITHUB_OUTPUT
+      - run: docker manifest inspect "img:${{ steps.tag.outputs.tag }}"
+"""
+
+
+def _scan_pair(upstream, downstream, tmp_path):
+    from ghast.scan import scan_paths
+
+    directory = tmp_path / ".github" / "workflows"
+    directory.mkdir(parents=True)
+    (directory / "upstream.yml").write_text(upstream)
+    (directory / "cd.yml").write_text(downstream)
+    result = scan_paths([str(tmp_path)], relative_to=str(tmp_path))
+    return [f for f in result.findings if f.rule_id == "GHAST001"]
+
+
+def test_workflow_run_behind_a_push_only_workflow_is_not_outsider_reachable(tmp_path):
+    """ruvnet/RuView: the deployment pipeline interpolates
+    `workflow_run.head_branch` into a shell command, which is a real injection
+    shape -- but the workflow that triggers it only runs on push and
+    workflow_dispatch, so the branch name comes from someone who already has
+    write access. Scoring that as critical overstates it by an order of
+    magnitude."""
+    findings = _scan_pair(_UPSTREAM_PUSH_ONLY, _DOWNSTREAM, tmp_path)
+    assert findings, "the injection itself must still be reported"
+    finding = findings[0]
+    assert finding.factors.actor == "write-access"
+    assert finding.severity in ("low", "medium")
+    assert any("only someone with write access" in n for n in finding.factors.notes)
+
+
+def test_workflow_run_behind_a_fork_pr_workflow_stays_critical(tmp_path):
+    findings = _scan_pair(_UPSTREAM_FORK_PR, _DOWNSTREAM, tmp_path)
+    assert findings
+    finding = findings[0]
+    assert finding.factors.actor == "any-github-user"
+    assert finding.severity == "critical"
+
+
+def test_unresolvable_upstream_keeps_the_worst_case(tmp_path):
+    """A single file scanned on its own has no siblings to consult, so the
+    conservative reading has to survive."""
+    from ghast.scan import scan_paths
+
+    directory = tmp_path / ".github" / "workflows"
+    directory.mkdir(parents=True)
+    (directory / "cd.yml").write_text(_DOWNSTREAM)
+    result = scan_paths([str(tmp_path)], relative_to=str(tmp_path))
+    findings = [f for f in result.findings if f.rule_id == "GHAST001"]
+    assert findings
+    assert findings[0].factors.actor == "any-github-user"
