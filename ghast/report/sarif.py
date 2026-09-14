@@ -39,7 +39,7 @@ def _rule_descriptor(rule_id: str) -> Dict[str, Any]:
             "precision": "high",
         },
         "helpUri": meta.references[0] if meta.references else
-                   "https://github.com/USERNAME/ghast#rules",
+                   "https://github.com/citizen204/ghast#rules",
     }
 
 
@@ -87,7 +87,7 @@ def render_sarif(result: ScanResult, indent: int = 2) -> str:
             "tool": {"driver": {
                 "name": "ghast",
                 "version": __version__,
-                "informationUri": "https://github.com/USERNAME/ghast",
+                "informationUri": "https://github.com/citizen204/ghast",
                 "rules": [_rule_descriptor(r) for r in used],
             }},
             "results": results,

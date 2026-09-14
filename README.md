@@ -25,7 +25,7 @@ at every hop.
 ## Quick start
 
 ```bash
-git clone https://github.com/USERNAME/ghast && cd ghast
+git clone https://github.com/citizen204/ghast && cd ghast
 make demo          # see it find things, and correctly not find things
 pip install -e .   # optional: puts `ghast` on your PATH
 ```
