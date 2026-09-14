@@ -1,0 +1,28 @@
+name: PR preview
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions: write-all
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole point of pull_request_target is that this does NOT happen.
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+      - run: npm ci && npm run build
+      - name: Deploy preview
+        env:
+          TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: ./deploy.sh --branch "${{ github.head_ref }}"
+
+  self-hosted-e2e:
+    runs-on: [self-hosted, linux, x64]
+    needs: preview
+    steps:
+      - run: make e2e

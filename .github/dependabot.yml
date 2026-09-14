@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keeps SHA pins current: Dependabot rewrites the pin and updates the
+  # trailing version comment, so pinning does not mean going stale.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly

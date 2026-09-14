@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghast"
+version = "0.1.0"
+description = "Taint-analysis security scanner for GitHub Actions workflows"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "chenxi" }]
+keywords = ["security", "github-actions", "ci-cd", "static-analysis", "supply-chain", "sast"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Topic :: Security",
+  "Programming Language :: Python :: 3.9",
+]
+dependencies = ["PyYAML>=5.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+ghast = "ghast.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/USERNAME/ghast"
+Issues = "https://github.com/USERNAME/ghast/issues"
+
+[tool.setuptools.packages.find]
+include = ["ghast*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

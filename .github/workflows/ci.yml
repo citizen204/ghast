@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege by default; the one job that needs more asks for it.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.11', '3.13']
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e '.[dev]'
+      - run: pytest -q
+
+  self-scan:
+    # ghast scans its own workflows. If this job ever fails, the tool found a
+    # real problem in this repository and the right response is to fix it.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.11'
+      - run: pip install -e .
+
+      - name: Scan this repository
+        run: ghast scan . --exclude examples --format sarif -o ghast.sarif --fail-on never
+
+      - name: Upload results to code scanning
+        uses: github/codeql-action/upload-sarif@48ab28a6f5dbc2a99bf1e0131198dd8f1df78169  # v3.28.0
+        with:
+          sarif_file: ghast.sarif
+          category: ghast
+
+      - name: Fail on high severity findings
+        run: ghast scan . --exclude examples --fail-on high
+
+      - name: Check the fixture expectations still hold
+        run: |
+          set -euo pipefail
+          # The vulnerable examples must still be detected ...
+          if ghast scan examples/vulnerable --fail-on critical; then
+            echo "::error::examples/vulnerable no longer reports a critical finding"
+            exit 1
+          fi
+          # ... and the hardened ones must stay clean.
+          ghast scan examples/safe --min-severity info --fail-on low

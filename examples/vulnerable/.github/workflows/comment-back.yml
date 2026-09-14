@@ -1,0 +1,23 @@
+name: Report results
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: dawidd6/action-download-artifact@v2
+        with:
+          run_id: ${{ github.event.workflow_run.id }}
+          name: pr-results
+      - run: |
+          unzip -o pr-results.zip -d ./results
+          source ./results/env.sh
+          gh pr comment "$PR_NUMBER" --body-file ./results/comment.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: some-vendor/notify@main
+        with:
+          message: ${{ github.event.workflow_run.display_title }}

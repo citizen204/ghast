@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.tox/
+.mypy_cache/
+.DS_Store
+*.sarif
+ghast-report.*
+
+# Personal planning notes — not part of the project.
+career-playbook.zh.md

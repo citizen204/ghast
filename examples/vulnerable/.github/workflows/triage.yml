@@ -1,0 +1,32 @@
+name: Issue triage
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created]
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Attacker writes the issue title, and it is pasted into the script.
+      - name: Derive a label
+        run: |
+          echo "Triaging: ${{ github.event.issue.title }}"
+          ./scripts/label.sh "${{ github.event.issue.title }}"
+
+  notify:
+    runs-on: ubuntu-latest
+    env:
+      BODY: ${{ github.event.issue.body }}
+    steps:
+      # Routed through the environment, but written into GITHUB_ENV verbatim:
+      # a newline in BODY defines new variables for every later step.
+      - id: shorten
+        run: echo "SUMMARY=${BODY:0:80}" >> $GITHUB_ENV
+      - run: echo "Summary was $SUMMARY"
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            core.info("comment: ${{ github.event.comment.body }}")

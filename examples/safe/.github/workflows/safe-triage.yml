@@ -1,0 +1,33 @@
+name: Issue triage (hardened)
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+      # The value travels as data in the environment and is always quoted.
+      - name: Derive a label
+        env:
+          TITLE: ${{ github.event.issue.title }}
+        run: |
+          echo "Triaging: $TITLE"
+          ./scripts/label.sh "$TITLE"
+      - name: Record it safely
+        env:
+          TITLE: ${{ github.event.issue.title }}
+        run: |
+          DELIM="ghadelim_$(openssl rand -hex 16)"
+          {
+            echo "SUMMARY<<$DELIM"
+            echo "$TITLE"
+            echo "$DELIM"
+          } >> "$GITHUB_ENV"
