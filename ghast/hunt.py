@@ -28,6 +28,15 @@ class GhError(RuntimeError):
     pass
 
 
+class NoWorkflows(GhError):
+    """The repository has no `.github/workflows` directory.
+
+    This is an ordinary outcome, not a failure: plenty of repositories -- the
+    Linux kernel, most awesome-lists -- have no GitHub Actions at all.
+    Reporting it as an error trains the reader to ignore the error list.
+    """
+
+
 def _gh(args: Sequence[str], timeout: int = 45) -> str:
     try:
         proc = subprocess.run(
@@ -39,7 +48,11 @@ def _gh(args: Sequence[str], timeout: int = 45) -> str:
     except subprocess.TimeoutExpired:
         raise GhError("gh timed out running: gh {}".format(" ".join(args)))
     if proc.returncode != 0:
-        raise GhError((proc.stderr or proc.stdout or "gh failed").strip().splitlines()[0])
+        message = (proc.stderr or proc.stdout or "gh failed").strip()
+        first = message.splitlines()[0] if message else "gh failed"
+        if "404" in first or "Not Found" in first:
+            raise NoWorkflows(first)
+        raise GhError(first)
     return proc.stdout
 
 
@@ -50,6 +63,16 @@ class RepoResult:
     workflows: List[model.Workflow] = field(default_factory=list)
     files: int = 0
     error: Optional[str] = None
+    #: The repository uses no GitHub Actions at all.  Not an error.
+    no_workflows: bool = False
+
+    @property
+    def status(self) -> str:
+        if self.no_workflows:
+            return "no workflows"
+        if self.error:
+            return self.error
+        return "{} finding(s) in {} file(s)".format(len(self.findings), self.files)
 
     @property
     def top_score(self) -> float:
@@ -66,7 +89,7 @@ def list_workflow_files(repo: str, ref: Optional[str] = None) -> List[Dict[str, 
     except json.JSONDecodeError:
         raise GhError("unexpected response listing {}".format(repo))
     if not isinstance(entries, list):
-        raise GhError("no workflow directory in {}".format(repo))
+        raise NoWorkflows("no workflow directory in {}".format(repo))
     return [
         {"name": e["name"], "path": e["path"]}
         for e in entries
@@ -91,8 +114,14 @@ def scan_repo(repo: str, ref: Optional[str] = None,
     result = RepoResult(repo=repo)
     try:
         entries = list_workflow_files(repo, ref)
+    except NoWorkflows:
+        result.no_workflows = True
+        return result
     except GhError as exc:
         result.error = str(exc)
+        return result
+    if not entries:
+        result.no_workflows = True
         return result
     for entry in entries[:max_files]:
         try:
@@ -141,10 +170,30 @@ def to_scan_result(results: Sequence[RepoResult]) -> ScanResult:
     return combined
 
 
+def summarise(results: Sequence[RepoResult]) -> str:
+    """One line describing the sweep, including the repositories with no CI."""
+    scanned = [r for r in results if not r.no_workflows and not r.error]
+    skipped = [r for r in results if r.no_workflows]
+    failed = [r for r in results if r.error and not r.no_workflows]
+    parts = ["{} repositories scanned".format(len(scanned))]
+    if skipped:
+        parts.append("{} use no GitHub Actions".format(len(skipped)))
+    if failed:
+        parts.append("{} could not be read".format(len(failed)))
+    return " · ".join(parts)
+
+
 def top_repos(language: Optional[str] = None, limit: int = 30,
               min_stars: int = 5000) -> List[str]:
-    """Popular repositories, as a starting point for a hunt."""
-    query = "stars:>={}".format(min_stars)
+    """Popular repositories, as a starting point for a hunt.
+
+    Star count is a poor proxy for "has interesting CI": the top of the
+    all-languages list is awesome-lists, interview prep and free-book
+    collections, which mostly have no workflows at all.  Passing a language
+    filters to repositories that actually build something, and `pushed:` drops
+    the ones that have been archived in all but name.
+    """
+    query = "stars:>={} pushed:>2025-01-01".format(min_stars)
     if language:
         query += " language:{}".format(language)
     raw = _gh([

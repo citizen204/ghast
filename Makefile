@@ -27,8 +27,12 @@ demo:  ## show the tool finding, and not finding, things
 	@echo "=== examples/safe — the same patterns, hardened — should report nothing ==="
 	@$(GHAST) scan examples/safe --min-severity info
 
-hunt:  ## scan the 25 most-starred public repositories (read-only)
-	$(GHAST) hunt --top 25 --min-severity high --fail-on never
+hunt:  ## read-only sweep of popular repositories that actually have CI
+	@# A language filter matters here: the most-starred repositories overall are
+	@# awesome-lists and tutorials, which have no workflows to scan.
+	$(GHAST) hunt --top 20 --language $(LANG_FILTER) --min-severity high --fail-on never
+
+LANG_FILTER ?= go
 
 clean:  ## remove build and cache artifacts
 	rm -rf build dist *.egg-info .pytest_cache .coverage

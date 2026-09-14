@@ -63,8 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
     hunt.add_argument("--from-file", metavar="FILE",
                       help="read repositories from FILE, one per line")
     hunt.add_argument("--top", type=int, metavar="N",
-                      help="scan the N most-starred public repositories")
-    hunt.add_argument("--language", metavar="LANG", help="restrict --top to a language")
+                      help="scan the N most-starred public repositories. Note that the "
+                           "most-starred repositories are largely awesome-lists and "
+                           "tutorials with no CI at all; pair this with --language for a "
+                           "corpus that actually builds software")
+    hunt.add_argument("--language", metavar="LANG",
+                      help="restrict --top to one language, e.g. go, python, rust")
     hunt.add_argument("--min-stars", type=int, default=5000,
                       help="star floor for --top (default: 5000)")
     hunt.add_argument("--ref", help="git ref to read workflows from")
@@ -151,7 +155,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def cmd_hunt(args: argparse.Namespace) -> int:
-    from .hunt import GhError, hunt, to_scan_result, top_repos
+    from .hunt import GhError, hunt, summarise, to_scan_result, top_repos
 
     repos: List[str] = list(args.repos)
     if args.from_file:
@@ -179,9 +183,7 @@ def cmd_hunt(args: argparse.Namespace) -> int:
 
     def progress(item) -> None:
         done[0] += 1
-        status = item.error or "{} finding(s) in {} file(s)".format(
-            len(item.findings), item.files)
-        print("[{}/{}] {} — {}".format(done[0], len(repos), item.repo, status),
+        print("[{}/{}] {} — {}".format(done[0], len(repos), item.repo, item.status),
               file=sys.stderr)
 
     try:
@@ -189,6 +191,7 @@ def cmd_hunt(args: argparse.Namespace) -> int:
     except GhError as exc:
         print("ghast: {}".format(exc), file=sys.stderr)
         return 2
+    print(summarise(results), file=sys.stderr)
     result = to_scan_result(results)
     _apply_filters(result, args)
     _emit(_render(result, args), args.output)

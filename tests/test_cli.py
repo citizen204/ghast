@@ -114,3 +114,26 @@ def test_exclude_accepts_a_bare_directory_name(tmp_path, capsys):
     (fixtures / "b.yml").write_text(VULN)
     main(["scan", root, "--format", "json", "--exclude", "examples"])
     assert json.loads(capsys.readouterr().out)["summary"]["files_scanned"] == 1
+
+
+def test_a_repository_without_workflows_is_not_an_error():
+    """`torvalds/linux` has no .github/workflows. That is an ordinary result,
+    and reporting it as a parse failure teaches people to ignore the error
+    list."""
+    from ghast.hunt import NoWorkflows, RepoResult, summarise, to_scan_result
+
+    results = [
+        RepoResult(repo="a/has-ci", files=3),
+        RepoResult(repo="b/no-ci", no_workflows=True),
+        RepoResult(repo="c/broken", error="gh: rate limit exceeded"),
+    ]
+    assert results[1].status == "no workflows"
+    assert issubclass(NoWorkflows, Exception)
+    scan_result = to_scan_result(results)
+    # Only the genuine failure is surfaced as an error.
+    assert len(scan_result.parse_errors) == 1
+    assert "c/broken" in scan_result.parse_errors[0]
+    line = summarise(results)
+    assert "1 repositories scanned" in line
+    assert "1 use no GitHub Actions" in line
+    assert "1 could not be read" in line
