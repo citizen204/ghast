@@ -76,6 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
                            "long tail, where projects have the same CI complexity as the "
                            "top of the list and far less security attention")
     hunt.add_argument("--ref", help="git ref to read workflows from")
+    hunt.add_argument("--distribution", action="store_true",
+                      help="always print the per-rule finding distribution; "
+                           "without this it is printed only when one rule "
+                           "dominates a severity band")
     hunt.add_argument("--workers", type=int, default=4,
                   help="parallel requests (default: 4). GitHub enforces a secondary "
                        "limit on burst concurrency separately from the hourly quota, "
@@ -162,6 +166,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def cmd_hunt(args: argparse.Namespace) -> int:
+    from . import distribution
     from .hunt import GhError, hunt, summarise, to_scan_result, top_repos
 
     repos: List[str] = list(args.repos)
@@ -202,6 +207,12 @@ def cmd_hunt(args: argparse.Namespace) -> int:
     print(summarise(results), file=sys.stderr)
     result = to_scan_result(results)
     _apply_filters(result, args)
+    shape = distribution.render(result.findings,
+                                show_all=getattr(args, "distribution", False))
+    if shape:
+        print("", file=sys.stderr)
+        print(shape, file=sys.stderr)
+        print("", file=sys.stderr)
     _emit(_render(result, args), args.output)
     return _exit_code(result, args.fail_on)
 

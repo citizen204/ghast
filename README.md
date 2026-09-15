@@ -277,6 +277,31 @@ imprecise but factually wrong about how GitHub works:
   `on.workflow_run.workflows` and scores accordingly — critical when the parent is
   fork-reachable, low when it is not, and worst-case when it cannot be resolved.
 
+### The tool now reports the shape that caught its worst bug
+
+GHAST023's false claim about cache scoping was not caught by a test. It was caught
+by a ratio: **59 of 61** medium findings came from that one rule. Every test passed
+before and after, because every test encoded the same wrong belief the code did.
+
+So `ghast hunt` now prints the per-rule distribution whenever one rule holds most of
+a severity band:
+
+```
+medium severity — 61 findings across 59 repositories
+  GHAST023     59   97%  <-- dominates this band
+  GHAST020      2    3%
+
+One rule holding most of a severity band usually means the rule is describing
+something normal, not something rare. Re-read what GHAST023 claims against the
+platform's documentation before trusting these findings. This is a shape, not a
+verdict — a widespread real mistake looks the same.
+```
+
+It is deliberately not a correctness check, and it says so. A rule may legitimately
+dominate a band if the mistake it detects is genuinely common, and a wrong rule that
+fires twice will never appear here at all. It reports a shape and names the rule to
+go and re-read. `--distribution` prints it unconditionally.
+
 ---
 
 ## Use it in CI
