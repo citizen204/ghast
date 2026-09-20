@@ -20,6 +20,13 @@ github.event.issue.title
 `ghast` follows that chain across jobs and prints it back to you with a line number
 at every hop.
 
+Run against **709 workflow files** in 29 large open-source repositories, it reported
+8 distinct critical/high issues and **zero false positives** — every one read by hand
+against the source. Thirteen of its rules exist in their current form *because* an
+earlier version of the tool got them wrong. That part is written up separately, in
+[**I built a GitHub Actions security scanner, then spent longer proving it
+wrong**](docs/WRONG-TWELVE-TIMES.md).
+
 ---
 
 ## Quick start
