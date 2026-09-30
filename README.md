@@ -20,6 +20,12 @@ github.event.issue.title
 `ghast` follows that chain across jobs and prints it back to you with a line number
 at every hop.
 
+![Attacker-controlled github.event.issue.body (line 22) flows into the job env BODY, is written through $BODY, and lands in $GITHUB_ENV (line 27); each hop turns red as the taint reaches it](docs/taint-chain.gif)
+
+<sub>The data flow `ghast` reports for
+[`examples/vulnerable/…/triage.yml`](examples/vulnerable/.github/workflows/triage.yml) —
+run `make demo` to see it.</sub>
+
 Run against **709 workflow files** in 29 large open-source repositories, it reported
 8 distinct critical/high issues and **zero false positives** — every one read by hand
 against the source. Thirteen of its rules exist in their current form *because* an
