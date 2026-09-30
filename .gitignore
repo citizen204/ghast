@@ -16,3 +16,6 @@ ghast-report.*
 
 # Personal planning notes — not part of the project.
 career-playbook.zh.md
+
+# Local tool state — not part of the project.
+.claude/
